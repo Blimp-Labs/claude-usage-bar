@@ -8,17 +8,29 @@ struct PopoverView: View {
     @State private var showLaunchPrompt = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Claude Usage")
-                .font(.headline)
-
-            if !service.isAuthenticated {
-                signInView
-            } else {
-                usageView
+        ZStack {
+            if service.isAuthenticated, let wallpaperURL = Bundle.module.url(forResource: "anime-mecha-art-wallpaper", withExtension: "webp"),
+               let nsImage = NSImage(contentsOf: wallpaperURL) {
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 340)
+                    .clipped()
+                    .opacity(0.15)
             }
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Claude Usage")
+                    .font(.headline)
+
+                if !service.isAuthenticated {
+                    signInView
+                } else {
+                    usageView
+                }
+            }
+            .padding()
         }
-        .padding()
         .frame(width: 340)
         .onAppear {
             if !launchAtLoginAsked {

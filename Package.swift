@@ -10,7 +10,10 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "ClaudeUsageBar",
-            path: "Sources/ClaudeUsageBar"
+            path: "Sources/ClaudeUsageBar",
+            resources: [
+                .process("anime-mecha-art-wallpaper.webp")
+            ]
         )
     ]
 )
