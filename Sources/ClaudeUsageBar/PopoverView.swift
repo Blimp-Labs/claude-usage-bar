@@ -170,7 +170,7 @@ private struct CodeEntryView: View {
 
         HStack {
             Button("Cancel") {
-                service.isAwaitingCode = false
+                service.cancelOAuthFlow()
             }
             .buttonStyle(.borderless)
             Spacer()
@@ -218,14 +218,22 @@ private struct UsageBucketRow: View {
 
 private struct ExtraUsageRow: View {
     let extra: ExtraUsage
+    private static let currencyFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.maximumFractionDigits = 2
+        formatter.minimumFractionDigits = 2
+        formatter.locale = .current
+        return formatter
+    }()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Extra Usage")
                 .font(.subheadline)
-            if let used = extra.usedCredits, let limit = extra.monthlyLimit {
+            if let used = extra.usedCreditsAmount, let limit = extra.monthlyLimitAmount {
                 HStack {
-                    Text(String(format: "$%.2f / $%.2f", used, limit))
+                    Text("\(formatCurrency(used)) / \(formatCurrency(limit))")
                         .font(.caption)
                         .monospacedDigit()
                     Spacer()
@@ -239,6 +247,11 @@ private struct ExtraUsageRow: View {
                     .tint(.blue)
             }
         }
+    }
+
+    private func formatCurrency(_ amount: Double) -> String {
+        Self.currencyFormatter.string(from: NSNumber(value: amount))
+            ?? String(format: "%.2f", amount)
     }
 }
 

@@ -59,14 +59,21 @@ Click the icon anytime to see:
 
 ## Data storage
 
-All data is stored locally in `~/.config/claude-usage-bar/`:
+Usage history is stored locally in `~/.config/claude-usage-bar/`:
 
 | File | Purpose |
 |------|---------|
-| `token` | OAuth access token (permissions: `0600`) |
 | `history.json` | Usage history for the chart (30-day retention) |
 
+The OAuth access token is stored in the macOS Keychain instead of a plaintext file. Existing installs using `~/.config/claude-usage-bar/token` are migrated on next launch and the legacy file is removed.
+
 History is buffered in memory and flushed to disk every 5 minutes and on app quit. No data is sent anywhere other than the Anthropic API.
+
+## Security notes
+
+- The app only talks to Anthropic OAuth and usage endpoints.
+- It uses PKCE for browser-based OAuth sign-in.
+- The current OAuth scope remains `user:profile user:inference` to preserve compatibility with Anthropic's existing usage integration until a narrower documented scope is confirmed.
 
 ## Development
 

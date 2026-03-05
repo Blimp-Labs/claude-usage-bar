@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import CryptoKit
 import AppKit
+import Security
 
 @MainActor
 class UsageService: ObservableObject {
@@ -17,6 +18,9 @@ class UsageService: ObservableObject {
     private let usageEndpoint = URL(string: "https://api.anthropic.com/api/oauth/usage")!
     private let baseInterval: TimeInterval = 60
     private var currentInterval: TimeInterval = 60
+    private static let oauthScope = "user:profile user:inference"
+    private static let keychainService = "com.local.ClaudeUsageBar"
+    private static let keychainAccount = "anthropic-oauth-token"
 
     // OAuth constants
     private let clientId = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
@@ -27,8 +31,8 @@ class UsageService: ObservableObject {
     private var codeVerifier: String?
     private var oauthState: String?
 
-    // File-based token storage (avoids Keychain prompts for unsigned binaries)
-    private static var tokenFileURL: URL {
+    // Legacy file token path kept only for migration from older installs.
+    private static var legacyTokenFileURL: URL {
         let dir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".config/claude-usage-bar", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -78,16 +82,25 @@ class UsageService: ObservableObject {
             URLQueryItem(name: "client_id", value: clientId),
             URLQueryItem(name: "response_type", value: "code"),
             URLQueryItem(name: "redirect_uri", value: redirectUri),
-            URLQueryItem(name: "scope", value: "user:profile user:inference"),
+            URLQueryItem(name: "scope", value: Self.oauthScope),
             URLQueryItem(name: "code_challenge", value: challenge),
             URLQueryItem(name: "code_challenge_method", value: "S256"),
             URLQueryItem(name: "state", value: state),
         ]
 
         if let url = components.url {
-            NSWorkspace.shared.open(url)
-            isAwaitingCode = true
+            lastError = nil
+            if NSWorkspace.shared.open(url) {
+                isAwaitingCode = true
+            } else {
+                clearPendingOAuthFlow(clearError: false)
+                lastError = "Could not open the browser for Claude sign-in"
+            }
         }
+    }
+
+    func cancelOAuthFlow() {
+        clearPendingOAuthFlow(clearError: false)
     }
 
     func submitOAuthCode(_ rawCode: String) async {
@@ -99,16 +112,14 @@ class UsageService: ObservableObject {
             let returnedState = String(parts[1])
             guard returnedState == oauthState else {
                 lastError = "OAuth state mismatch — try again"
-                isAwaitingCode = false
-                codeVerifier = nil
-                oauthState = nil
+                clearPendingOAuthFlow(clearError: false)
                 return
             }
         }
 
         guard let verifier = codeVerifier else {
             lastError = "No pending OAuth flow"
-            isAwaitingCode = false
+            clearPendingOAuthFlow(clearError: false)
             return
         }
 
@@ -145,12 +156,13 @@ class UsageService: ObservableObject {
                 return
             }
 
-            saveToken(accessToken)
+            guard saveToken(accessToken) else {
+                lastError = "Could not store session securely in macOS Keychain"
+                clearPendingOAuthFlow(clearError: false)
+                return
+            }
             isAuthenticated = true
-            isAwaitingCode = false
-            lastError = nil
-            codeVerifier = nil
-            oauthState = nil
+            clearPendingOAuthFlow(clearError: true)
 
             startPolling()
         } catch {
@@ -229,24 +241,99 @@ class UsageService: ObservableObject {
         }
     }
 
-    // MARK: - File-based token storage
+    private func clearPendingOAuthFlow(clearError: Bool) {
+        isAwaitingCode = false
+        codeVerifier = nil
+        oauthState = nil
+        if clearError {
+            lastError = nil
+        }
+    }
 
-    private func saveToken(_ token: String) {
-        let url = Self.tokenFileURL
-        try? Data(token.utf8).write(to: url, options: .atomic)
-        // Restrict permissions to owner-only (0600)
-        try? FileManager.default.setAttributes(
-            [.posixPermissions: 0o600], ofItemAtPath: url.path)
+    // MARK: - Keychain token storage
+
+    private func saveToken(_ token: String) -> Bool {
+        guard let data = token.data(using: .utf8) else { return false }
+
+        let query = baseKeychainQuery()
+        let attributes = [kSecValueData: data] as CFDictionary
+        let updateStatus = SecItemUpdate(query, attributes)
+
+        switch updateStatus {
+        case errSecSuccess:
+            deleteLegacyToken()
+            return true
+        case errSecItemNotFound:
+            var item = baseKeychainAttributes()
+            item[kSecValueData] = data
+            let addStatus = SecItemAdd(item as CFDictionary, nil)
+            if addStatus == errSecSuccess {
+                deleteLegacyToken()
+                return true
+            }
+            return false
+        default:
+            return false
+        }
     }
 
     private func loadToken() -> String? {
-        guard let data = try? Data(contentsOf: Self.tokenFileURL) else { return nil }
+        if let token = loadTokenFromKeychain() {
+            return token
+        }
+
+        guard let legacyToken = loadLegacyToken() else { return nil }
+        if saveToken(legacyToken) {
+            return legacyToken
+        }
+        return legacyToken
+    }
+
+    private func deleteToken() {
+        SecItemDelete(baseKeychainQuery())
+        deleteLegacyToken()
+    }
+
+    private func loadTokenFromKeychain() -> String? {
+        var query = baseKeychainAttributes()
+        query[kSecReturnData] = true
+        query[kSecMatchLimit] = kSecMatchLimitOne
+
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        guard status == errSecSuccess,
+              let data = item as? Data else {
+            return nil
+        }
+
         let token = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
         return token?.isEmpty == false ? token : nil
     }
 
-    private func deleteToken() {
-        try? FileManager.default.removeItem(at: Self.tokenFileURL)
+    private func loadLegacyToken() -> String? {
+        guard let data = try? Data(contentsOf: Self.legacyTokenFileURL) else { return nil }
+        let token = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return token?.isEmpty == false ? token : nil
+    }
+
+    private func deleteLegacyToken() {
+        try? FileManager.default.removeItem(at: Self.legacyTokenFileURL)
+    }
+
+    private func baseKeychainQuery() -> CFDictionary {
+        [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: Self.keychainService,
+            kSecAttrAccount: Self.keychainAccount,
+        ] as CFDictionary
+    }
+
+    private func baseKeychainAttributes() -> [CFString: Any] {
+        [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: Self.keychainService,
+            kSecAttrAccount: Self.keychainAccount,
+        ]
     }
 }
 

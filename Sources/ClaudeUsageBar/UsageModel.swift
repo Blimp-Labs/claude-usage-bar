@@ -49,4 +49,12 @@ struct ExtraUsage: Codable {
         case usedCredits = "used_credits"
         case monthlyLimit = "monthly_limit"
     }
+
+    var usedCreditsAmount: Double? {
+        usedCredits.map { $0 / 100.0 }
+    }
+
+    var monthlyLimitAmount: Double? {
+        monthlyLimit.map { $0 / 100.0 }
+    }
 }
