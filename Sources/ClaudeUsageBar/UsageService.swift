@@ -15,8 +15,20 @@ class UsageService: ObservableObject {
 
     private var timer: AnyCancellable?
     private let usageEndpoint = URL(string: "https://api.anthropic.com/api/oauth/usage")!
-    private let baseInterval: TimeInterval = 60
-    private var currentInterval: TimeInterval = 60
+    private var currentInterval: TimeInterval
+
+    static let defaultPollingMinutes = 30
+    static let pollingOptions = [5, 15, 30, 60]
+
+    @Published var pollingMinutes: Int {
+        didSet {
+            UserDefaults.standard.set(pollingMinutes, forKey: "pollingMinutes")
+            currentInterval = TimeInterval(pollingMinutes * 60)
+            if isAuthenticated { scheduleTimer() }
+        }
+    }
+
+    private var baseInterval: TimeInterval { TimeInterval(pollingMinutes * 60) }
 
     // OAuth constants
     private let clientId = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
@@ -41,6 +53,10 @@ class UsageService: ObservableObject {
     var reset7d: Date? { usage?.sevenDay?.resetsAtDate }
 
     init() {
+        let stored = UserDefaults.standard.integer(forKey: "pollingMinutes")
+        let minutes = Self.pollingOptions.contains(stored) ? stored : Self.defaultPollingMinutes
+        self.pollingMinutes = minutes
+        self.currentInterval = TimeInterval(minutes * 60)
         isAuthenticated = loadToken() != nil
     }
 

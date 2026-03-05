@@ -118,6 +118,32 @@ struct PopoverView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            Text("Polling every")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                
+            Picker("", selection: $service.pollingMinutes) {
+                ForEach(UsageService.pollingOptions, id: \.self) { mins in
+                    Text(mins < 60 ? "\(mins)m" : "\(mins / 60)h").tag(mins)
+                }
+            }
+            .pickerStyle(.menu)
+            .controlSize(.mini)
+            .frame(width: 60)
+            .help("Polling interval")
+        }
+
+        HStack(spacing: 12) {
+          Toggle("Launch at Login", isOn: Binding(
+              get: { SMAppService.mainApp.status == .enabled },
+              set: { setLaunchAtLogin($0) }
+          ))
+          .toggleStyle(.switch)
+          .controlSize(.mini)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+
+            Spacer()
             Button("Refresh") {
                 Task { await service.fetchUsage() }
             }
@@ -132,15 +158,6 @@ struct PopoverView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
-
-        Toggle("Launch at Login", isOn: Binding(
-            get: { SMAppService.mainApp.status == .enabled },
-            set: { setLaunchAtLogin($0) }
-        ))
-        .toggleStyle(.switch)
-        .controlSize(.mini)
-        .font(.caption)
-        .foregroundStyle(.secondary)
     }
 }
 

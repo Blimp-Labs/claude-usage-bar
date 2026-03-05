@@ -13,24 +13,32 @@ private let iconWidth: CGFloat = logoSize + logoGap + barsWidth
 private let iconHeight: CGFloat = 18
 private let fontSize: CGFloat = 8
 
-private func makeAttrs() -> [NSAttributedString.Key: Any] {
-    [
-        .font: NSFont.monospacedSystemFont(ofSize: fontSize, weight: .medium),
-        .foregroundColor: NSColor.black,
-    ]
+private struct CachedLabel {
+    let string: NSAttributedString
+    let size: NSSize
 }
 
-private func drawRow(label: String, barX: CGFloat, barY: CGFloat, attrs: [NSAttributedString.Key: Any], labelX: CGFloat, drawBarFill: (CGFloat, CGFloat) -> Void) {
-    let str = NSAttributedString(string: label, attributes: attrs)
-    let labelSize = str.size()
-    let labelY = barY + (barHeight - labelSize.height) / 2
-    str.draw(at: NSPoint(x: labelX + labelWidth - labelSize.width, y: labelY))
+private let cachedLabels: [String: CachedLabel] = {
+    let font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .medium)
+    let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
+    var result = [String: CachedLabel]()
+    for label in ["5h", "7d"] {
+        let str = NSAttributedString(string: label, attributes: attrs)
+        result[label] = CachedLabel(string: str, size: str.size())
+    }
+    return result
+}()
+
+private func drawRow(label: String, barX: CGFloat, barY: CGFloat, labelX: CGFloat, drawBarFill: (CGFloat, CGFloat) -> Void) {
+    if let cached = cachedLabels[label] {
+        let labelY = barY + (barHeight - cached.size.height) / 2
+        cached.string.draw(at: NSPoint(x: labelX + labelWidth - cached.size.width, y: labelY))
+    }
     drawBarFill(barX, barY)
 }
 
 func renderIcon(pct5h: Double, pct7d: Double) -> NSImage {
     let image = NSImage(size: NSSize(width: iconWidth, height: iconHeight), flipped: true) { _ in
-        let attrs = makeAttrs()
         let offset = logoSize + logoGap
         let barX = offset + labelWidth + labelGap
         let topY = (iconHeight - barHeight * 2 - rowGap) / 2
@@ -38,10 +46,10 @@ func renderIcon(pct5h: Double, pct7d: Double) -> NSImage {
 
         drawClaudeLogo(x: 0, y: (iconHeight - logoSize) / 2, size: logoSize)
 
-        drawRow(label: "5h", barX: barX, barY: topY, attrs: attrs, labelX: offset) { x, y in
+        drawRow(label: "5h", barX: barX, barY: topY, labelX: offset) { x, y in
             drawBar(x: x, y: y, width: barWidth, height: barHeight, cornerRadius: cornerRadius, pct: pct5h)
         }
-        drawRow(label: "7d", barX: barX, barY: bottomY, attrs: attrs, labelX: offset) { x, y in
+        drawRow(label: "7d", barX: barX, barY: bottomY, labelX: offset) { x, y in
             drawBar(x: x, y: y, width: barWidth, height: barHeight, cornerRadius: cornerRadius, pct: pct7d)
         }
         return true
@@ -52,7 +60,6 @@ func renderIcon(pct5h: Double, pct7d: Double) -> NSImage {
 
 func renderUnauthenticatedIcon() -> NSImage {
     let image = NSImage(size: NSSize(width: iconWidth, height: iconHeight), flipped: true) { _ in
-        let attrs = makeAttrs()
         let offset = logoSize + logoGap
         let barX = offset + labelWidth + labelGap
         let topY = (iconHeight - barHeight * 2 - rowGap) / 2
@@ -60,10 +67,10 @@ func renderUnauthenticatedIcon() -> NSImage {
 
         drawClaudeLogo(x: 0, y: (iconHeight - logoSize) / 2, size: logoSize)
 
-        drawRow(label: "5h", barX: barX, barY: topY, attrs: attrs, labelX: offset) { x, y in
+        drawRow(label: "5h", barX: barX, barY: topY, labelX: offset) { x, y in
             drawDashedBar(x: x, y: y, width: barWidth, height: barHeight, cornerRadius: cornerRadius)
         }
-        drawRow(label: "7d", barX: barX, barY: bottomY, attrs: attrs, labelX: offset) { x, y in
+        drawRow(label: "7d", barX: barX, barY: bottomY, labelX: offset) { x, y in
             drawDashedBar(x: x, y: y, width: barWidth, height: barHeight, cornerRadius: cornerRadius)
         }
         return true
