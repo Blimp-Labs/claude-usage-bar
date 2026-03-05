@@ -139,6 +139,7 @@ struct PopoverView: View {
                 }
                 .buttonStyle(.borderless)
                 .font(.caption)
+                .disabled(service.isRateLimited)
             }
             Divider().frame(height: 12)
             Button("Sign Out") { service.signOut() }

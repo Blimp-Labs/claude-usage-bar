@@ -36,6 +36,7 @@ class UsageService: ObservableObject {
     var pct7d: Double { (usage?.sevenDay?.utilization ?? 0) / 100.0 }
     var reset5h: Date? { usage?.fiveHour?.resetsAtDate }
     var reset7d: Date? { usage?.sevenDay?.resetsAtDate }
+    var isRateLimited: Bool { lastError?.hasPrefix("Rate limited") == true }
 
     init(historyService: UsageHistoryService) {
         self.historyService = historyService
@@ -221,9 +222,8 @@ class UsageService: ObservableObject {
                 return
             }
             if http.statusCode == 429 {
-                let retryAfter = http.value(forHTTPHeaderField: "Retry-After")
-                    .flatMap(Double.init) ?? currentInterval
-                currentInterval = min(max(retryAfter, currentInterval * 2), 600)
+                let retryAfter = http.value(forHTTPHeaderField: "Retry-After").flatMap(Double.init)
+                currentInterval = min(retryAfter ?? min(currentInterval * 2, 600), 600)
                 lastError = "Rate limited — backing off to \(Int(currentInterval))s"
                 Logger.usage.warning("Rate limited, backing off to \(self.currentInterval, privacy: .public)s")
                 scheduleTimer()
