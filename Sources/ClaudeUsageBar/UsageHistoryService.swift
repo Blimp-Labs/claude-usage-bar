@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import AppKit
+import OSLog
 
 @MainActor
 class UsageHistoryService: ObservableObject {
@@ -13,12 +14,6 @@ class UsageHistoryService: ObservableObject {
     private static let retentionInterval: TimeInterval = 30 * 86400 // 30 days
     private static let flushInterval: TimeInterval = 300 // 5 minutes
 
-    private static var historyFileURL: URL {
-        let dir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".config/claude-usage-bar", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("history.json")
-    }
 
     init() {
         terminationObserver = NotificationCenter.default.addObserver(
@@ -41,16 +36,26 @@ class UsageHistoryService: ObservableObject {
     // MARK: - Load
 
     func loadHistory() {
-        let url = Self.historyFileURL
+        let url = AppConfig.historyURL
         guard FileManager.default.fileExists(atPath: url.path) else { return }
+
+        let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+        let fileSize = attrs?[.size] as? Int ?? 0
+        if fileSize > 5_000_000 {
+            Logger.history.warning("history.json is \(fileSize) bytes — truncating to fresh state")
+            history = UsageHistory()
+            return
+        }
 
         do {
             let data = try Data(contentsOf: url)
             var loaded = try JSONDecoder.historyDecoder.decode(UsageHistory.self, from: data)
             loaded.dataPoints = pruned(loaded.dataPoints)
             history = loaded
+            Logger.history.info("Loaded \(loaded.dataPoints.count) history points")
         } catch {
             // Corrupt file — rename to .bak and start fresh
+            Logger.history.error("Failed to decode history.json, renaming to .bak: \(error.localizedDescription, privacy: .public)")
             let backup = url.deletingPathExtension().appendingPathExtension("bak.json")
             try? FileManager.default.removeItem(at: backup)
             try? FileManager.default.moveItem(at: url, to: backup)
@@ -70,15 +75,16 @@ class UsageHistoryService: ObservableObject {
     // MARK: - Flush
 
     func flushToDisk() {
+        flushTimer?.cancel()
+        flushTimer = nil
         guard isDirty else { return }
         history.dataPoints = pruned(history.dataPoints)
 
         guard let data = try? JSONEncoder.historyEncoder.encode(history) else { return }
-        try? data.write(to: Self.historyFileURL, options: .atomic)
+        try? data.write(to: AppConfig.historyURL, options: .atomic)
+        Logger.history.info("Flushed \(self.history.dataPoints.count) history points to disk")
 
         isDirty = false
-        flushTimer?.cancel()
-        flushTimer = nil
     }
 
     private func startFlushTimerIfNeeded() {
