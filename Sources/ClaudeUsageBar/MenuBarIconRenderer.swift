@@ -1,4 +1,5 @@
 import AppKit
+import OSLog
 
 private let labelWidth: CGFloat = 14
 private let barWidth: CGFloat = 24
@@ -13,6 +14,8 @@ private let iconWidth: CGFloat = logoSize + logoGap + barsWidth
 private let iconHeight: CGFloat = 18
 private let fontSize: CGFloat = 8
 
+// NSColor.black is intentional: the icon uses isTemplate = true, so macOS uses
+// the alpha channel as a mask and ignores the actual color at render time.
 private func makeAttrs() -> [NSAttributedString.Key: Any] {
     [
         .font: NSFont.monospacedSystemFont(ofSize: fontSize, weight: .medium),
@@ -106,6 +109,10 @@ private let claudeSVG = "M52.4285 162.873L98.7844 136.879L99.5485 134.602L98.784
 
 private func drawClaudeLogo(x: CGFloat, y: CGFloat, size: CGFloat) {
     let path = parseSVGPath(claudeSVG)
+    guard path.elementCount > 0 else {
+        Logger.usage.warning("Claude SVG path parsed zero elements — icon will be blank")
+        return
+    }
     let scale = size / 248.0
     var t = AffineTransform.identity
     t.scale(scale)
@@ -134,7 +141,8 @@ private func parseSVGPath(_ d: String) -> NSBezierPath {
         if chars[i] == "-" { i += 1 }
         while i < chars.count && (chars[i].isNumber || chars[i] == ".") { i += 1 }
         guard i > start else { return nil }
-        return CGFloat(Double(String(chars[start..<i]))!)
+        guard let d = Double(String(chars[start..<i])) else { return nil }
+        return CGFloat(d)
     }
 
     while i < chars.count {

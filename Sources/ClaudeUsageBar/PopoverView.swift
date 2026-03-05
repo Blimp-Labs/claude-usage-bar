@@ -19,8 +19,11 @@ struct PopoverView: View {
             }
         }
         .padding()
-        .frame(width: 340)
+        .frame(minWidth: 300, idealWidth: 340, maxWidth: 400)
         .onAppear {
+            AppConfig.ensureDirectoryExists()
+            historyService.loadHistory()
+            service.startPolling()
             if !launchAtLoginAsked {
                 showLaunchPrompt = true
             }
@@ -36,6 +39,12 @@ struct PopoverView: View {
         } message: {
             Text("Would you like Claude Usage Bar to start automatically when you log in?")
         }
+    }
+
+    private var versionString: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "—"
+        return "v\(version) (\(build))"
     }
 
     @ViewBuilder
@@ -111,22 +120,31 @@ struct PopoverView: View {
 
         Divider()
 
-        HStack(spacing: 12) {
+        HStack(spacing: 8) {
             if let updated = service.lastUpdated {
                 Text("Updated \(updated, style: .relative) ago")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .help(updated.formatted(.dateTime.hour().minute().second()))
             }
+            Text(versionString)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
             Spacer()
-            Button("Refresh") {
-                Task { await service.fetchUsage() }
+            if service.isLoading {
+                ProgressView().controlSize(.small)
+            } else {
+                Button("Refresh") {
+                    Task { await service.fetchUsage() }
+                }
+                .buttonStyle(.borderless)
+                .font(.caption)
             }
-            .buttonStyle(.borderless)
-            .font(.caption)
+            Divider().frame(height: 12)
             Button("Sign Out") { service.signOut() }
                 .buttonStyle(.borderless)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.red)
             Button("Quit") { NSApplication.shared.terminate(nil) }
                 .buttonStyle(.borderless)
                 .font(.caption)
@@ -170,7 +188,7 @@ private struct CodeEntryView: View {
 
         HStack {
             Button("Cancel") {
-                service.isAwaitingCode = false
+                service.cancelOAuthFlow()
             }
             .buttonStyle(.borderless)
             Spacer()
@@ -199,9 +217,12 @@ private struct UsageBucketRow: View {
                 Text(percentageText)
                     .font(.subheadline)
                     .monospacedDigit()
+                    .contentTransition(.numericText())
+                    .animation(.easeInOut(duration: 0.4), value: bucket?.utilization)
             }
             ProgressView(value: (bucket?.utilization ?? 0) / 100.0, total: 1.0)
                 .tint(colorForPct((bucket?.utilization ?? 0) / 100.0))
+                .animation(.easeInOut(duration: 0.4), value: bucket?.utilization)
             if let resetDate = bucket?.resetsAtDate {
                 Text("Resets \(resetDate, style: .relative)")
                     .font(.caption2)
@@ -233,10 +254,13 @@ private struct ExtraUsageRow: View {
                         Text("\(Int(round(pct)))%")
                             .font(.caption)
                             .monospacedDigit()
+                            .contentTransition(.numericText())
+                            .animation(.easeInOut(duration: 0.4), value: extra.utilization)
                     }
                 }
                 ProgressView(value: (extra.utilization ?? 0) / 100.0, total: 1.0)
-                    .tint(.blue)
+                    .tint(colorForPct((extra.utilization ?? 0) / 100.0))
+                    .animation(.easeInOut(duration: 0.4), value: extra.utilization)
             }
         }
     }
