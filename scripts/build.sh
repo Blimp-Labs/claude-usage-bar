@@ -28,14 +28,14 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 cp "$PROJECT_DIR/Resources/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 cp "$BINARY" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
-# --- Compile Asset Catalog (generates Assets.car + AppIcon.icns) ---
-echo "==> Compiling Asset Catalog..."
-actool --compile "$APP_BUNDLE/Contents/Resources" \
-       --platform macosx \
-       --minimum-deployment-target 14.0 \
-       --app-icon AppIcon \
-       --output-partial-info-plist /dev/null \
-       "$PROJECT_DIR/Resources/Assets.xcassets" > /dev/null
+# --- Compile app icon (iconutil works with Command Line Tools; no full Xcode needed) ---
+echo "==> Compiling app icon..."
+ICONSET_SRC="$PROJECT_DIR/Resources/Assets.xcassets/AppIcon.appiconset"
+ICONSET_TMP="$(mktemp -d)/AppIcon.iconset"
+mkdir -p "$ICONSET_TMP"
+cp "$ICONSET_SRC"/*.png "$ICONSET_TMP/"
+iconutil -c icns "$ICONSET_TMP" -o "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
+rm -rf "$(dirname "$ICONSET_TMP")"
 
 # --- Ad-hoc codesign ---
 echo "==> Codesigning (ad-hoc)..."
