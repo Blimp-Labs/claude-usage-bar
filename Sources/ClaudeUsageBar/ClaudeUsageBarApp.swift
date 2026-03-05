@@ -16,8 +16,8 @@ struct ClaudeUsageBarApp: App {
             PopoverView(service: service, historyService: historyService)
         } label: {
             Image(nsImage: service.isAuthenticated
-                ? renderIcon(pct5h: service.pct5h, pct7d: service.pct7d)
-                : renderUnauthenticatedIcon()
+                ? cachedIcon(pct5h: service.pct5h, pct7d: service.pct7d)
+                : cachedUnauthenticatedIcon()
             )
         }
         .menuBarExtraStyle(.window)

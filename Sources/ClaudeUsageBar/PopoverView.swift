@@ -6,6 +6,7 @@ struct PopoverView: View {
     @ObservedObject var historyService: UsageHistoryService
     @AppStorage("launchAtLoginAsked") private var launchAtLoginAsked = false
     @State private var showLaunchPrompt = false
+    @State private var didInitialize = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -21,6 +22,8 @@ struct PopoverView: View {
         .padding()
         .frame(minWidth: 300, idealWidth: 340, maxWidth: 400)
         .onAppear {
+            guard !didInitialize else { return }
+            didInitialize = true
             AppConfig.ensureDirectoryExists()
             historyService.loadHistory()
             service.startPolling()
