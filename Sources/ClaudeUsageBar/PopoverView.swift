@@ -133,7 +133,7 @@ struct PopoverView: View {
             Menu {
                 ForEach(UsageService.pollingOptions, id: \.self) { mins in
                     Button {
-                        service.pollingMinutes = mins
+                        service.updatePollingInterval(mins)
                     } label: {
                         if mins == service.pollingMinutes {
                             Label(pollingOptionLabel(for: mins), systemImage: "checkmark")

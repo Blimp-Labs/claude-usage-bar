@@ -13,7 +13,7 @@ class UsageService: ObservableObject {
 
     var historyService: UsageHistoryService?
 
-    private var timer: AnyCancellable?
+    private var timer: Timer?
     private let usageEndpoint = URL(string: "https://api.anthropic.com/api/oauth/usage")!
     private var currentInterval: TimeInterval
 
@@ -21,11 +21,15 @@ class UsageService: ObservableObject {
     static let pollingOptions = [5, 15, 30, 60]
     nonisolated static let maxBackoffInterval: TimeInterval = 60 * 60
 
-    @Published var pollingMinutes: Int {
-        didSet {
-            UserDefaults.standard.set(pollingMinutes, forKey: "pollingMinutes")
-            currentInterval = TimeInterval(pollingMinutes * 60)
-            if isAuthenticated { scheduleTimer() }
+    @Published private(set) var pollingMinutes: Int
+
+    func updatePollingInterval(_ minutes: Int) {
+        pollingMinutes = minutes
+        UserDefaults.standard.set(minutes, forKey: "pollingMinutes")
+        currentInterval = TimeInterval(minutes * 60)
+        if isAuthenticated {
+            scheduleTimer()
+            Task { await fetchUsage() }
         }
     }
 
@@ -77,13 +81,15 @@ class UsageService: ObservableObject {
     }
 
     private func scheduleTimer() {
-        timer?.cancel()
-        timer = Timer.publish(every: currentInterval, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in
+        timer?.invalidate()
+        let t = Timer(timeInterval: currentInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
                 guard let self, self.isAuthenticated else { return }
                 Task { await self.fetchUsage() }
             }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
     }
 
     // MARK: - OAuth PKCE Flow
