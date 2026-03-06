@@ -1,7 +1,6 @@
 import Foundation
 import Combine
-import CryptoKit
-import AppKit
+import Security
 
 @MainActor
 class UsageService: ObservableObject {
@@ -9,12 +8,12 @@ class UsageService: ObservableObject {
     @Published var lastError: String?
     @Published var lastUpdated: Date?
     @Published var isAuthenticated = false
-    @Published var isAwaitingCode = false
 
     var historyService: UsageHistoryService?
 
     private var timer: AnyCancellable?
     private let usageEndpoint = URL(string: "https://api.anthropic.com/api/oauth/usage")!
+    private let tokenEndpoint = URL(string: "https://console.anthropic.com/v1/oauth/token")!
     private var currentInterval: TimeInterval
 
     static let defaultPollingMinutes = 30
@@ -30,23 +29,6 @@ class UsageService: ObservableObject {
 
     private var baseInterval: TimeInterval { TimeInterval(pollingMinutes * 60) }
 
-    // OAuth constants
-    private let clientId = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-    private let redirectUri = "https://console.anthropic.com/oauth/code/callback"
-    private let tokenEndpoint = URL(string: "https://console.anthropic.com/v1/oauth/token")!
-
-    // PKCE state (lives only during an auth flow)
-    private var codeVerifier: String?
-    private var oauthState: String?
-
-    // File-based token storage (avoids Keychain prompts for unsigned binaries)
-    private static var tokenFileURL: URL {
-        let dir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".config/claude-usage-bar", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("token")
-    }
-
     var pct5h: Double { (usage?.fiveHour?.utilization ?? 0) / 100.0 }
     var pct7d: Double { (usage?.sevenDay?.utilization ?? 0) / 100.0 }
     var reset5h: Date? { usage?.fiveHour?.resetsAtDate }
@@ -57,7 +39,7 @@ class UsageService: ObservableObject {
         let minutes = Self.pollingOptions.contains(stored) ? stored : Self.defaultPollingMinutes
         self.pollingMinutes = minutes
         self.currentInterval = TimeInterval(minutes * 60)
-        isAuthenticated = loadToken() != nil
+        isAuthenticated = loadClaudeCodeToken() != nil
     }
 
     // MARK: - Polling
@@ -78,131 +60,118 @@ class UsageService: ObservableObject {
             }
     }
 
-    // MARK: - OAuth PKCE Flow
+    // MARK: - Keychain (Claude Code credentials)
 
-    func startOAuthFlow() {
-        let verifier = generateCodeVerifier()
-        let challenge = generateCodeChallenge(from: verifier)
-        let state = generateCodeVerifier() // random state
-
-        codeVerifier = verifier
-        oauthState = state
-
-        var components = URLComponents(string: "https://claude.ai/oauth/authorize")!
-        components.queryItems = [
-            URLQueryItem(name: "code", value: "true"),
-            URLQueryItem(name: "client_id", value: clientId),
-            URLQueryItem(name: "response_type", value: "code"),
-            URLQueryItem(name: "redirect_uri", value: redirectUri),
-            URLQueryItem(name: "scope", value: "user:profile user:inference"),
-            URLQueryItem(name: "code_challenge", value: challenge),
-            URLQueryItem(name: "code_challenge_method", value: "S256"),
-            URLQueryItem(name: "state", value: state),
-        ]
-
-        if let url = components.url {
-            NSWorkspace.shared.open(url)
-            isAwaitingCode = true
-        }
+    private struct ClaudeCodeCredentials {
+        let accessToken: String
+        let refreshToken: String?
+        let expiresAt: TimeInterval
     }
 
-    func submitOAuthCode(_ rawCode: String) async {
-        // Response format: "code#state" — parse it
-        let parts = rawCode.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "#", maxSplits: 1)
-        let code = String(parts[0])
+    private func loadClaudeCodeToken() -> ClaudeCodeCredentials? {
+        guard let json = readKeychainJSON() else { return nil }
+        guard let oauth = json["claudeAiOauth"] as? [String: Any],
+              let accessToken = oauth["accessToken"] as? String else { return nil }
+        let refreshToken = oauth["refreshToken"] as? String
+        let expiresAt = oauth["expiresAt"] as? TimeInterval ?? 0
+        return ClaudeCodeCredentials(
+            accessToken: accessToken,
+            refreshToken: refreshToken,
+            expiresAt: expiresAt
+        )
+    }
 
-        if parts.count > 1 {
-            let returnedState = String(parts[1])
-            guard returnedState == oauthState else {
-                lastError = "OAuth state mismatch — try again"
-                isAwaitingCode = false
-                codeVerifier = nil
-                oauthState = nil
-                return
-            }
-        }
+    private func readKeychainJSON() -> [String: Any]? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "Claude Code-credentials",
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess, let data = result as? Data else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
 
-        guard let verifier = codeVerifier else {
-            lastError = "No pending OAuth flow"
-            isAwaitingCode = false
-            return
-        }
+    private func updateKeychainToken(accessToken: String, refreshToken: String?, expiresAt: TimeInterval) {
+        guard var json = readKeychainJSON(),
+              var oauth = json["claudeAiOauth"] as? [String: Any] else { return }
+        oauth["accessToken"] = accessToken
+        if let refreshToken { oauth["refreshToken"] = refreshToken }
+        oauth["expiresAt"] = expiresAt
+        json["claudeAiOauth"] = oauth
 
-        // Exchange code for token
+        guard let data = try? JSONSerialization.data(withJSONObject: json) else { return }
+
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "Claude Code-credentials",
+        ]
+        let update: [String: Any] = [kSecValueData as String: data]
+        SecItemUpdate(query as CFDictionary, update as CFDictionary)
+    }
+
+    // MARK: - Token Refresh
+
+    private func refreshAccessToken(credentials: ClaudeCodeCredentials) async -> String? {
+        guard let refreshToken = credentials.refreshToken else { return nil }
+
         var request = URLRequest(url: tokenEndpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         let body: [String: String] = [
-            "grant_type": "authorization_code",
-            "code": code,
-            "state": oauthState ?? "",
-            "client_id": clientId,
-            "redirect_uri": redirectUri,
-            "code_verifier": verifier,
+            "grant_type": "refresh_token",
+            "refresh_token": refreshToken,
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse else {
-                lastError = "Invalid token response"
-                return
-            }
-            guard http.statusCode == 200 else {
-                let bodyStr = String(data: data, encoding: .utf8) ?? ""
-                lastError = "Token exchange failed: HTTP \(http.statusCode) \(bodyStr)"
-                return
-            }
-
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return nil }
             guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let accessToken = json["access_token"] as? String else {
-                lastError = "Could not parse token response"
-                return
-            }
+                  let newAccessToken = json["access_token"] as? String else { return nil }
+            let newRefreshToken = json["refresh_token"] as? String
+            let expiresIn = json["expires_in"] as? TimeInterval ?? 3600
+            let newExpiresAt = Date().timeIntervalSince1970 * 1000 + expiresIn * 1000
 
-            saveToken(accessToken)
-            isAuthenticated = true
-            isAwaitingCode = false
-            lastError = nil
-            codeVerifier = nil
-            oauthState = nil
-
-            startPolling()
+            updateKeychainToken(
+                accessToken: newAccessToken,
+                refreshToken: newRefreshToken ?? refreshToken,
+                expiresAt: newExpiresAt
+            )
+            return newAccessToken
         } catch {
-            lastError = "Token exchange error: \(error.localizedDescription)"
+            return nil
         }
     }
 
-    func signOut() {
-        deleteToken()
-        isAuthenticated = false
-        usage = nil
-        lastError = nil
-        lastUpdated = nil
-    }
+    private func getValidToken() async -> String? {
+        guard let credentials = loadClaudeCodeToken() else { return nil }
 
-    // MARK: - PKCE Helpers
+        let nowMs = Date().timeIntervalSince1970 * 1000
+        if credentials.expiresAt > nowMs + 60_000 {
+            return credentials.accessToken
+        }
 
-    private func generateCodeVerifier() -> String {
-        var bytes = [UInt8](repeating: 0, count: 32)
-        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-        return Data(bytes).base64URLEncoded()
-    }
+        if let newToken = await refreshAccessToken(credentials: credentials) {
+            return newToken
+        }
 
-    private func generateCodeChallenge(from verifier: String) -> String {
-        let hash = SHA256.hash(data: Data(verifier.utf8))
-        return Data(hash).base64URLEncoded()
+        return credentials.accessToken
     }
 
     // MARK: - API Fetch
 
     func fetchUsage() async {
-        guard let token = loadToken() else {
-            lastError = "Not signed in"
+        guard let token = await getValidToken() else {
+            lastError = "Claude Code not signed in"
             isAuthenticated = false
             return
         }
+
+        isAuthenticated = true
 
         var request = URLRequest(url: usageEndpoint)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -215,8 +184,26 @@ class UsageService: ObservableObject {
                 return
             }
             if http.statusCode == 401 {
-                lastError = "Session expired — please sign in again"
-                signOut()
+                if let credentials = loadClaudeCodeToken(),
+                   let freshToken = await refreshAccessToken(credentials: credentials) {
+                    var retry = URLRequest(url: usageEndpoint)
+                    retry.setValue("Bearer \(freshToken)", forHTTPHeaderField: "Authorization")
+                    retry.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+                    let (retryData, retryResp) = try await URLSession.shared.data(for: retry)
+                    guard let retryHttp = retryResp as? HTTPURLResponse, retryHttp.statusCode == 200 else {
+                        lastError = "Session expired — re-login in Claude Code"
+                        isAuthenticated = false
+                        return
+                    }
+                    let decoded = try JSONDecoder().decode(UsageResponse.self, from: retryData)
+                    usage = decoded
+                    lastError = nil
+                    lastUpdated = Date()
+                    historyService?.recordDataPoint(pct5h: pct5h, pct7d: pct7d)
+                    return
+                }
+                lastError = "Session expired — re-login in Claude Code"
+                isAuthenticated = false
                 return
             }
             if http.statusCode == 429 {
@@ -243,36 +230,5 @@ class UsageService: ObservableObject {
         } catch {
             lastError = error.localizedDescription
         }
-    }
-
-    // MARK: - File-based token storage
-
-    private func saveToken(_ token: String) {
-        let url = Self.tokenFileURL
-        try? Data(token.utf8).write(to: url, options: .atomic)
-        // Restrict permissions to owner-only (0600)
-        try? FileManager.default.setAttributes(
-            [.posixPermissions: 0o600], ofItemAtPath: url.path)
-    }
-
-    private func loadToken() -> String? {
-        guard let data = try? Data(contentsOf: Self.tokenFileURL) else { return nil }
-        let token = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return token?.isEmpty == false ? token : nil
-    }
-
-    private func deleteToken() {
-        try? FileManager.default.removeItem(at: Self.tokenFileURL)
-    }
-}
-
-// MARK: - Base64URL
-
-extension Data {
-    func base64URLEncoded() -> String {
-        base64EncodedString()
-            .replacingOccurrences(of: "+", with: "-")
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "=", with: "")
     }
 }

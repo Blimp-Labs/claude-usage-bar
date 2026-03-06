@@ -40,19 +40,13 @@ struct PopoverView: View {
 
     @ViewBuilder
     private var signInView: some View {
-        if service.isAwaitingCode {
-            CodeEntryView(service: service)
-        } else {
-            Text("Sign in to view your usage.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+        Text("Claude Code not signed in")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
 
-            Button("Sign in with Claude") {
-                service.startOAuthFlow()
-            }
-            .buttonStyle(.borderedProminent)
-            .frame(maxWidth: .infinity)
-        }
+        Text("Run `claude auth login` in Terminal")
+            .font(.caption)
+            .foregroundStyle(.tertiary)
 
         if let error = service.lastError {
             Label(error, systemImage: "exclamationmark.triangle")
@@ -149,57 +143,11 @@ struct PopoverView: View {
             }
             .buttonStyle(.borderless)
             .font(.caption)
-            Button("Sign Out") { service.signOut() }
-                .buttonStyle(.borderless)
-                .font(.caption)
-                .foregroundStyle(.secondary)
             Button("Quit") { NSApplication.shared.terminate(nil) }
                 .buttonStyle(.borderless)
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
-    }
-}
-
-private struct CodeEntryView: View {
-    @ObservedObject var service: UsageService
-    @State private var code = ""
-
-    var body: some View {
-        Text("Paste the code from your browser:")
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
-
-        HStack(spacing: 4) {
-            TextField("code#state", text: $code)
-                .textFieldStyle(.roundedBorder)
-                .font(.system(.body, design: .monospaced))
-                .onSubmit { submit() }
-            Button {
-                if let str = NSPasteboard.general.string(forType: .string) {
-                    code = str.trimmingCharacters(in: .whitespacesAndNewlines)
-                }
-            } label: {
-                Image(systemName: "doc.on.clipboard")
-            }
-            .buttonStyle(.borderless)
-        }
-
-        HStack {
-            Button("Cancel") {
-                service.isAwaitingCode = false
-            }
-            .buttonStyle(.borderless)
-            Spacer()
-            Button("Submit") { submit() }
-                .buttonStyle(.borderedProminent)
-                .disabled(code.isEmpty)
-        }
-    }
-
-    private func submit() {
-        let value = code
-        Task { await service.submitOAuthCode(value) }
     }
 }
 
