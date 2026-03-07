@@ -1,0 +1,23 @@
+{
+    "KPlugin": {
+        "Id": "org.kde.plasma.claude-usage",
+        "Name": "Claude Usage",
+        "Description": "Shows your Claude API usage (5-hour and 7-day windows) in the KDE panel",
+        "Icon": "preferences-system-network",
+        "Authors": [
+            {
+                "Name": "Claude Usage Bar Contributors",
+                "Email": ""
+            }
+        ],
+        "Category": "Online Services",
+        "License": "BSD-2-Clause",
+        "Version": "1.0.0",
+        "Website": "https://github.com/Blimp-Labs/claude-usage-bar"
+    },
+    "KPackageStructure": "Plasma/Applet",
+    "X-Plasma-API": "declarativeappletscript",
+    "X-Plasma-API-Minimum-Version": "6.0",
+    "X-Plasma-MainScript": "ui/main.qml",
+    "X-Plasma-Provides": ["org.kde.plasma.systemmonitor"]
+}
