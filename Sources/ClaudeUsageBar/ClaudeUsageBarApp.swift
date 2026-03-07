@@ -9,9 +9,10 @@ struct ClaudeUsageBarApp: App {
         MenuBarExtra {
             PopoverView(service: service, historyService: historyService)
         } label: {
-            Image(nsImage: service.isAuthenticated
-                ? renderIcon(pct5h: service.pct5h, pct7d: service.pct7d)
-                : renderUnauthenticatedIcon()
+            RightClickableMenuBarLabel(
+                image: service.isAuthenticated
+                    ? renderIcon(pct5h: service.pct5h, pct7d: service.pct7d)
+                    : renderUnauthenticatedIcon()
             )
                 .task {
                     historyService.loadHistory()
