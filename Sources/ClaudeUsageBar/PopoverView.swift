@@ -6,6 +6,25 @@ struct PopoverView: View {
     @ObservedObject var historyService: UsageHistoryService
     @AppStorage("launchAtLoginAsked") private var launchAtLoginAsked = false
     @State private var showLaunchPrompt = false
+    @State private var isDetailMode = false
+
+    /// Segments derived from the API's per-model 7-day buckets.
+    /// Returns nil when per-model data isn't available yet.
+    private var sevenDaySegments: [SegmentedProgressView.Segment]? {
+        guard let total = service.usage?.sevenDay?.utilization, total > 0 else { return nil }
+        var segs: [SegmentedProgressView.Segment] = []
+        if let pct = service.usage?.sevenDaySonnet?.utilization, pct > 0 {
+            segs.append(.init(label: "Sonnet", color: .teal, fraction: pct / total))
+        }
+        if let pct = service.usage?.sevenDayOpus?.utilization, pct > 0 {
+            segs.append(.init(label: "Opus", color: .purple, fraction: pct / total))
+        }
+        let accounted = segs.reduce(0) { $0 + $1.fraction }
+        if accounted < 0.99 {
+            segs.append(.init(label: "Other", color: .secondary, fraction: 1.0 - accounted))
+        }
+        return segs.isEmpty ? nil : segs
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -79,20 +98,13 @@ struct PopoverView: View {
 
         UsageBucketRow(
             label: "7-Day Window",
-            bucket: service.usage?.sevenDay
+            bucket: service.usage?.sevenDay,
+            segments: isDetailMode ? sevenDaySegments : nil
         )
-
-        if let opus = service.usage?.sevenDayOpus,
-           opus.utilization != nil {
-            Divider()
-            Text("Per-Model (7 day)")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            UsageBucketRow(label: "Opus", bucket: opus)
-            if let sonnet = service.usage?.sevenDaySonnet {
-                UsageBucketRow(label: "Sonnet", bucket: sonnet)
-            }
-        }
+        .simultaneousGesture(TapGesture().onEnded {
+            guard NSEvent.modifierFlags.contains(.option) else { return }
+            isDetailMode.toggle()
+        })
 
         if let extra = service.usage?.extraUsage, extra.isEnabled {
             Divider()
@@ -189,6 +201,7 @@ private struct CodeEntryView: View {
 private struct UsageBucketRow: View {
     let label: String
     let bucket: UsageBucket?
+    var segments: [SegmentedProgressView.Segment]? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -200,8 +213,15 @@ private struct UsageBucketRow: View {
                     .font(.subheadline)
                     .monospacedDigit()
             }
-            ProgressView(value: (bucket?.utilization ?? 0) / 100.0, total: 1.0)
-                .tint(colorForPct((bucket?.utilization ?? 0) / 100.0))
+            if let segs = segments {
+                SegmentedProgressView(
+                    fillFraction: (bucket?.utilization ?? 0) / 100.0,
+                    segments: segs
+                )
+            } else {
+                ProgressView(value: (bucket?.utilization ?? 0) / 100.0, total: 1.0)
+                    .tint(colorForPct((bucket?.utilization ?? 0) / 100.0))
+            }
             if let resetDate = bucket?.resetsAtDate {
                 Text("Resets \(resetDate, style: .relative)")
                     .font(.caption2)
