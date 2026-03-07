@@ -221,13 +221,13 @@ PlasmaExtras.Representation {
                         RowLayout {
                             PC3.Label {
                                 text: "$" + fullRoot.extraUsed.toFixed(2) + " / $" + fullRoot.extraLimit.toFixed(2)
-                                font: Kirigami.Theme.smallFont
+                                font.pointSize: Kirigami.Theme.smallFont.pointSize
                                 font.family: "monospace"
                             }
                             Item { Layout.fillWidth: true }
                             PC3.Label {
                                 text: Math.round(fullRoot.extraUtilization) + "%"
-                                font: Kirigami.Theme.smallFont
+                                font.pointSize: Kirigami.Theme.smallFont.pointSize
                                 font.family: "monospace"
                             }
                         }
