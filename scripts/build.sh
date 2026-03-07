@@ -37,6 +37,13 @@ actool --compile "$APP_BUNDLE/Contents/Resources" \
        --output-partial-info-plist /dev/null \
        "$PROJECT_DIR/Resources/Assets.xcassets" > /dev/null
 
+# --- Strip extended attributes before codesigning ---
+# actool and ditto can leave resource forks / Finder metadata that cause
+# codesign to fail with "resource fork, Finder information, or similar
+# detritus not allowed". Stripping them first makes the step reliable
+# across all environments.
+xattr -cr "$APP_BUNDLE"
+
 # --- Ad-hoc codesign ---
 echo "==> Codesigning (ad-hoc)..."
 codesign --force --sign - "$APP_BUNDLE"
