@@ -14,9 +14,10 @@ struct ClaudeUsageBarApp: App {
                 appUpdater: appUpdater
             )
         } label: {
-            Image(nsImage: service.isAuthenticated
-                ? renderIcon(pct5h: service.pct5h, pct7d: service.pct7d)
-                : renderUnauthenticatedIcon()
+            RightClickableMenuBarLabel(
+                image: service.isAuthenticated
+                    ? renderIcon(pct5h: service.pct5h, pct7d: service.pct7d)
+                    : renderUnauthenticatedIcon()
             )
                 .task {
                     historyService.loadHistory()
