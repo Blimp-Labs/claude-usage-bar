@@ -168,6 +168,10 @@ class MockHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/api/oauth/usage":
             self.handle_usage()
+        elif self.path.startswith("/scenario/"):
+            self.handle_set_scenario()
+        elif self.path == "/api/oauth/userinfo":
+            self.handle_userinfo()
         else:
             self.send_error(404)
 
@@ -176,6 +180,28 @@ class MockHandler(BaseHTTPRequestHandler):
             self.handle_token()
         else:
             self.send_error(404)
+
+    def handle_set_scenario(self):
+        name = self.path.split("/scenario/", 1)[1]
+        all_scenarios = list(SCENARIOS.keys()) + ["unauthenticated", "rate_limited", "error"]
+        if name not in all_scenarios:
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": f"Unknown scenario: {name}", "available": all_scenarios}).encode())
+            return
+        self.server.scenario = name
+        print(f"\n>>> Scenario switched to: {name}\n")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps({"scenario": name}).encode())
+
+    def handle_userinfo(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps({"email": "test@example.com", "name": "Test User"}).encode())
 
     def handle_usage(self):
         scenario = self.server.scenario
@@ -253,14 +279,14 @@ def main():
         print(f"  --scenario {name}")
     print()
     print("Switch scenario at runtime:")
-    print(f"  curl http://127.0.0.1:{args.port}/api/oauth/usage")
+    print(f"  curl http://127.0.0.1:{args.port}/scenario/high")
+    print(f"  curl http://127.0.0.1:{args.port}/scenario/low")
     print()
-    print(
-        "Tip: To change scenarios without restarting, modify UsageService to point at"
-    )
-    print(
-        f"     http://127.0.0.1:{args.port}/api/oauth/usage and restart the app."
-    )
+    print("Test notification flow:")
+    print(f"  1. Point app at http://127.0.0.1:{args.port}")
+    print(f"  2. Start with: --scenario low")
+    print(f"  3. Wait for one poll, then: curl http://127.0.0.1:{args.port}/scenario/high")
+    print(f"  4. Next poll should trigger a notification")
     print()
 
     try:

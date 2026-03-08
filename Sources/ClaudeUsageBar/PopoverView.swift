@@ -4,39 +4,31 @@ import ServiceManagement
 struct PopoverView: View {
     @ObservedObject var service: UsageService
     @ObservedObject var historyService: UsageHistoryService
+    @ObservedObject var notificationService: NotificationService
     @ObservedObject var appUpdater: AppUpdater
-    @AppStorage("launchAtLoginAsked") private var launchAtLoginAsked = false
-    @State private var showLaunchPrompt = false
+    @AppStorage("setupComplete") private var setupComplete = false
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Claude Usage")
-                .font(.headline)
-
-            if !service.isAuthenticated {
+            if !setupComplete && !service.isAuthenticated {
+                SetupView(
+                    service: service,
+                    notificationService: notificationService,
+                    onComplete: { setupComplete = true }
+                )
+            } else if !service.isAuthenticated {
+                Text("Claude Usage")
+                    .font(.headline)
                 signInView
             } else {
+                Text("Claude Usage")
+                    .font(.headline)
                 usageView
             }
         }
         .padding()
         .frame(width: 340)
-        .onAppear {
-            if !launchAtLoginAsked {
-                showLaunchPrompt = true
-            }
-        }
-        .alert("Launch at Login?", isPresented: $showLaunchPrompt) {
-            Button("Enable") {
-                setLaunchAtLogin(true)
-                launchAtLoginAsked = true
-            }
-            Button("No Thanks", role: .cancel) {
-                launchAtLoginAsked = true
-            }
-        } message: {
-            Text("Would you like Claude Usage Bar to start automatically when you log in?")
-        }
     }
 
     @ViewBuilder
@@ -63,6 +55,7 @@ struct PopoverView: View {
 
         Divider()
         HStack {
+            settingsButton
             Spacer()
             Button("Quit") {
                 NSApplication.shared.terminate(nil)
@@ -126,40 +119,10 @@ struct PopoverView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Text("Polling every")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Menu {
-                ForEach(UsageService.pollingOptions, id: \.self) { mins in
-                    Button {
-                        service.updatePollingInterval(mins)
-                    } label: {
-                        if mins == service.pollingMinutes {
-                            Label(pollingOptionLabel(for: mins), systemImage: "checkmark")
-                        } else {
-                            Text(pollingOptionLabel(for: mins))
-                        }
-                    }
-                }
-            } label: {
-                Text(localizedPollingInterval(for: service.pollingMinutes, locale: .autoupdatingCurrent))
-            }
-            .controlSize(.mini)
-            .fixedSize()
-            .help("Polling interval")
         }
 
         HStack(spacing: 12) {
-            Toggle("Launch at Login", isOn: Binding(
-                get: { SMAppService.mainApp.status == .enabled },
-                set: { setLaunchAtLogin($0) }
-            ))
-            .toggleStyle(.switch)
-            .controlSize(.mini)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-
+            settingsButton
             Spacer()
             Button("Refresh") {
                 Task { await service.fetchUsage() }
@@ -174,10 +137,106 @@ struct PopoverView: View {
                 .font(.caption)
                 .disabled(!appUpdater.canCheckForUpdates)
             }
-            Button("Sign Out") { service.signOut() }
+            Button("Quit") { NSApplication.shared.terminate(nil) }
                 .buttonStyle(.borderless)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private var settingsButton: some View {
+        Button("Settings…") {
+            openWindow(id: "settings")
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        .buttonStyle(.borderless)
+        .font(.caption)
+    }
+}
+
+// MARK: - Setup (first launch)
+
+private struct SetupView: View {
+    @ObservedObject var service: UsageService
+    @ObservedObject var notificationService: NotificationService
+    var onComplete: () -> Void
+
+    var body: some View {
+        Text("Welcome")
+            .font(.headline)
+        Text("Configure your preferences to get started.")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+
+        Divider()
+
+        Toggle("Launch at Login", isOn: Binding(
+            get: { SMAppService.mainApp.status == .enabled },
+            set: { setLaunchAtLogin($0) }
+        ))
+        .toggleStyle(.switch)
+        .controlSize(.small)
+
+        Divider()
+
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Notifications")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            SetupThresholdSlider(
+                label: "5-hour window",
+                value: notificationService.threshold5h,
+                onChange: { notificationService.setThreshold5h($0) }
+            )
+            SetupThresholdSlider(
+                label: "7-day window",
+                value: notificationService.threshold7d,
+                onChange: { notificationService.setThreshold7d($0) }
+            )
+            SetupThresholdSlider(
+                label: "Extra usage",
+                value: notificationService.thresholdExtra,
+                onChange: { notificationService.setThresholdExtra($0) }
+            )
+        }
+
+        Divider()
+
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Polling Interval")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            Picker("", selection: Binding(
+                get: { service.pollingMinutes },
+                set: { service.updatePollingInterval($0) }
+            )) {
+                ForEach(UsageService.pollingOptions, id: \.self) { mins in
+                    Text(localizedPollingInterval(for: mins, locale: .autoupdatingCurrent))
+                        .tag(mins)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            if isDiscouragedPollingOption(service.pollingMinutes) {
+                Text("Frequent polling may cause rate limiting")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
+        }
+
+        Divider()
+
+        Button("Get Started") {
+            onComplete()
+        }
+        .buttonStyle(.borderedProminent)
+        .frame(maxWidth: .infinity)
+
+        HStack {
+            Spacer()
             Button("Quit") { NSApplication.shared.terminate(nil) }
                 .buttonStyle(.borderless)
                 .font(.caption)
@@ -185,6 +244,20 @@ struct PopoverView: View {
         }
     }
 }
+
+func setLaunchAtLogin(_ enabled: Bool) {
+    do {
+        if enabled {
+            try SMAppService.mainApp.register()
+        } else {
+            try SMAppService.mainApp.unregister()
+        }
+    } catch {
+        // Silently ignore — user can toggle again
+    }
+}
+
+// MARK: - Subviews
 
 private struct CodeEntryView: View {
     @ObservedObject var service: UsageService
@@ -284,15 +357,31 @@ private struct ExtraUsageRow: View {
     }
 }
 
-private func setLaunchAtLogin(_ enabled: Bool) {
-    do {
-        if enabled {
-            try SMAppService.mainApp.register()
-        } else {
-            try SMAppService.mainApp.unregister()
+private struct SetupThresholdSlider: View {
+    let label: String
+    let value: Int
+    let onChange: (Int) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text(label)
+                    .font(.callout)
+                Spacer()
+                Text(value > 0 ? "\(value)%" : "Off")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            Slider(
+                value: Binding(
+                    get: { Double(value) },
+                    set: { onChange(Int($0)) }
+                ),
+                in: 0...100,
+                step: 5
+            )
+            .controlSize(.small)
         }
-    } catch {
-        // Silently ignore — user can toggle again
     }
 }
 

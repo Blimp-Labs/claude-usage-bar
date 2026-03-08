@@ -10,11 +10,14 @@ class UsageService: ObservableObject {
     @Published var lastUpdated: Date?
     @Published var isAuthenticated = false
     @Published var isAwaitingCode = false
+    @Published private(set) var accountEmail: String?
 
     var historyService: UsageHistoryService?
+    var notificationService: NotificationService?
 
     private var timer: Timer?
     private let usageEndpoint = URL(string: "https://api.anthropic.com/api/oauth/usage")!
+    private let userinfoEndpoint = URL(string: "https://api.anthropic.com/api/oauth/userinfo")!
     private var currentInterval: TimeInterval
 
     static let defaultPollingMinutes = 30
@@ -61,6 +64,7 @@ class UsageService: ObservableObject {
 
     var pct5h: Double { (usage?.fiveHour?.utilization ?? 0) / 100.0 }
     var pct7d: Double { (usage?.sevenDay?.utilization ?? 0) / 100.0 }
+    var pctExtra: Double { (usage?.extraUsage?.utilization ?? 0) / 100.0 }
     var reset5h: Date? { usage?.fiveHour?.resetsAtDate }
     var reset7d: Date? { usage?.sevenDay?.resetsAtDate }
 
@@ -76,7 +80,10 @@ class UsageService: ObservableObject {
 
     func startPolling() {
         guard isAuthenticated else { return }
-        Task { await fetchUsage() }
+        Task {
+            await fetchUsage()
+            if accountEmail == nil { await fetchProfile() }
+        }
         scheduleTimer()
     }
 
@@ -182,6 +189,7 @@ class UsageService: ObservableObject {
             codeVerifier = nil
             oauthState = nil
 
+            await fetchProfile()
             startPolling()
         } catch {
             lastError = "Token exchange error: \(error.localizedDescription)"
@@ -194,6 +202,7 @@ class UsageService: ObservableObject {
         usage = nil
         lastError = nil
         lastUpdated = nil
+        accountEmail = nil
     }
 
     // MARK: - PKCE Helpers
@@ -254,6 +263,7 @@ class UsageService: ObservableObject {
             lastError = nil
             lastUpdated = Date()
             historyService?.recordDataPoint(pct5h: pct5h, pct7d: pct7d)
+            notificationService?.checkAndNotify(pct5h: pct5h, pct7d: pct7d, pctExtra: pctExtra)
             if currentInterval != baseInterval {
                 currentInterval = baseInterval
                 scheduleTimer()
@@ -261,6 +271,52 @@ class UsageService: ObservableObject {
         } catch {
             lastError = error.localizedDescription
         }
+    }
+
+    // MARK: - Profile
+
+    func fetchProfile() async {
+        if let local = Self.loadLocalProfile() {
+            accountEmail = local
+            return
+        }
+
+        guard let token = loadToken() else { return }
+
+        var request = URLRequest(url: userinfoEndpoint)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse,
+              http.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return
+        }
+
+        if let email = json["email"] as? String, !email.isEmpty {
+            accountEmail = email
+        } else if let name = json["name"] as? String, !name.isEmpty {
+            accountEmail = name
+        }
+    }
+
+    /// Try reading the email from Claude Code's local config as a fallback.
+    private static func loadLocalProfile() -> String? {
+        let url = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude.json")
+        guard let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let account = json["oauthAccount"] as? [String: Any] else {
+            return nil
+        }
+        if let email = account["emailAddress"] as? String, !email.isEmpty {
+            return email
+        }
+        if let name = account["displayName"] as? String, !name.isEmpty {
+            return name
+        }
+        return nil
     }
 
     // MARK: - File-based token storage
