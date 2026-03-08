@@ -145,7 +145,7 @@ class NotificationService: ObservableObject {
         content.sound = .default
 
         let request = UNNotificationRequest(
-            identifier: "\(window)-\(UUID().uuidString)",
+            identifier: "usage-\(window)",
             content: content,
             trigger: nil
         )

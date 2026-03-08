@@ -17,14 +17,14 @@ struct PopoverView: View {
                     notificationService: notificationService,
                     onComplete: { setupComplete = true }
                 )
-            } else if !service.isAuthenticated {
-                Text("Claude Usage")
-                    .font(.headline)
-                signInView
             } else {
                 Text("Claude Usage")
                     .font(.headline)
-                usageView
+                if !service.isAuthenticated {
+                    signInView
+                } else {
+                    usageView
+                }
             }
         }
         .padding()
