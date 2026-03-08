@@ -40,9 +40,6 @@ struct SettingsWindowContent: View {
                     value: notificationService.thresholdExtra,
                     onChange: { notificationService.setThresholdExtra($0) }
                 )
-                Button("Send Test Notification") {
-                    notificationService.sendTestNotification()
-                }
             }
 
             if service.isAuthenticated {
