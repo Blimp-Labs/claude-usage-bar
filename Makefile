@@ -1,18 +1,18 @@
 .PHONY: build app zip install clean
 
 build:
-	swift build -c release
+	cd macos && swift build -c release
 
 app:
-	bash scripts/build.sh
+	bash macos/scripts/build.sh
 
 zip:
-	bash scripts/build.sh --zip
+	bash macos/scripts/build.sh --zip
 
 install: app
 	rm -rf /Applications/ClaudeUsageBar.app
-	cp -R ClaudeUsageBar.app /Applications/
+	cp -R macos/ClaudeUsageBar.app /Applications/
 
 clean:
-	swift package clean
-	rm -rf ClaudeUsageBar.app ClaudeUsageBar.zip
+	cd macos && swift package clean
+	rm -rf macos/ClaudeUsageBar.app macos/ClaudeUsageBar.zip

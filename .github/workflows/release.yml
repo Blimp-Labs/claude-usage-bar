@@ -73,7 +73,7 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          files: ClaudeUsageBar.zip
+          files: macos/ClaudeUsageBar.zip
           body_path: dist/release-notes.md
 
       - name: Generate Sparkle appcast
@@ -85,10 +85,10 @@ jobs:
             exit 1
           fi
 
-          cp ClaudeUsageBar.zip dist/archives/ClaudeUsageBar.zip
+          cp macos/ClaudeUsageBar.zip dist/archives/ClaudeUsageBar.zip
 
           printf '%s' "$SPARKLE_PRIVATE_KEY" | \
-            .build/artifacts/sparkle/Sparkle/bin/generate_appcast \
+            macos/.build/artifacts/sparkle/Sparkle/bin/generate_appcast \
               dist/archives \
               --ed-key-file - \
               --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/" \

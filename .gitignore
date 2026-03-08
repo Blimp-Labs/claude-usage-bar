@@ -1,6 +1,6 @@
 .build/
 .swiftpm/
 *.zip
-ClaudeUsageBar.app/
+*.app/
 .DS_Store
 xcuserdata/

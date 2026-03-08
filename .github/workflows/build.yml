@@ -13,13 +13,16 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build release binary
-        run: swift build -c release
+        run: cd macos && swift build -c release
 
       - name: Build .app bundle
         run: make app
+
+      - name: Run tests
+        run: cd macos && swift test
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ClaudeUsageBar.app
-          path: ClaudeUsageBar.app
+          path: macos/ClaudeUsageBar.app
