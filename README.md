@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="Resources/icon.png" width="128" alt="Claude Usage Bar icon">
+  <img src="macos/Resources/icon.png" width="128" alt="Claude Usage Bar icon">
 </p>
 
 # Claude Usage Bar
@@ -9,7 +9,7 @@ Have you ever found yourself refreshing the Claude usage page, wondering how clo
 Now it's just a glimpse away — always sitting at the top of your screen.
 
 <p align="center">
-  <img src="Resources/demo.png" width="400" alt="Claude Usage Bar demo">
+  <img src="macos/Resources/demo.png" width="400" alt="Claude Usage Bar demo">
 </p>
 
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue)
@@ -97,8 +97,8 @@ This repo now uses a tag-driven release flow. Pushing a `v*` tag will:
 Publishing a release is just:
 
 ```sh
-git tag v0.0.4
-git push origin v0.0.4
+git tag v0.0.5
+git push origin v0.0.5
 ```
 
 One-time repo setup:
@@ -111,7 +111,7 @@ Local source builds intentionally ship with Sparkle disabled unless `SU_FEED_URL
 You can export the current Sparkle private key from your local Keychain with:
 
 ```sh
-.build/artifacts/sparkle/Sparkle/bin/generate_keys --account claude-usage-bar -x /tmp/claude-usage-bar.sparkle.key
+macos/.build/artifacts/sparkle/Sparkle/bin/generate_keys --account claude-usage-bar -x /tmp/claude-usage-bar.sparkle.key
 gh secret set SPARKLE_PRIVATE_KEY < /tmp/claude-usage-bar.sparkle.key
 ```
 
@@ -124,35 +124,34 @@ https://blimp-labs.github.io/claude-usage-bar/appcast.xml
 ### Project structure
 
 ```
-Sources/ClaudeUsageBar/
-├── ClaudeUsageBarApp.swift      # App entry point, menu bar setup
-├── UsageService.swift           # OAuth, polling, API calls
-├── UsageModel.swift             # API response types
-├── UsageHistoryModel.swift      # History data types, time ranges
-├── UsageHistoryService.swift    # Persistence, downsampling
-├── UsageChartView.swift         # Swift Charts trajectory view
-├── PopoverView.swift            # Main popover UI
-├── MenuBarIconRenderer.swift    # Menu bar icon drawing
-├── PollingOptionFormatter.swift # Polling interval display labels
-├── AppUpdater.swift             # Sparkle update integration
-└── Resources/
-    ├── claude-logo.png          # Pre-rendered menu bar logo (512px)
-    └── en.lproj/Localizable.strings
+macos/                           # macOS menu bar app (Swift/SwiftUI)
+├── Sources/ClaudeUsageBar/
+│   ├── ClaudeUsageBarApp.swift      # App entry point, menu bar setup
+│   ├── UsageService.swift           # OAuth, polling, API calls
+│   ├── UsageModel.swift             # API response types
+│   ├── UsageHistoryModel.swift      # History data types, time ranges
+│   ├── UsageHistoryService.swift    # Persistence, downsampling
+│   ├── UsageChartView.swift         # Swift Charts trajectory view
+│   ├── PopoverView.swift            # Main popover UI
+│   ├── SettingsView.swift           # Settings window
+│   ├── NotificationService.swift    # Usage threshold notifications
+│   ├── MenuBarIconRenderer.swift    # Menu bar icon drawing
+│   ├── PollingOptionFormatter.swift # Polling interval display labels
+│   ├── AppUpdater.swift             # Sparkle update integration
+│   └── Resources/
+│       ├── claude-logo.png          # Pre-rendered menu bar logo (512px)
+│       └── en.lproj/Localizable.strings
+├── Tests/ClaudeUsageBarTests/
+├── Resources/                       # App bundle resources (not SwiftPM)
+│   ├── Info.plist
+│   ├── Assets.xcassets/             # App icon
+│   └── claude-logo.svg             # Source SVG for menu bar logo
+├── scripts/
+│   ├── build.sh                     # Build + bundle + codesign
+│   └── generate-logo-png.swift      # Regenerate logo PNG from SVG
+└── Package.swift
 
-Tests/ClaudeUsageBarTests/
-├── UsageServiceTests.swift
-├── UsageModelTests.swift
-└── PollingOptionFormatterTests.swift
-
-Resources/                       # App bundle resources (not SwiftPM)
-├── Info.plist
-├── Assets.xcassets/             # App icon
-├── claude-logo.svg              # Source SVG for menu bar logo
-└── icon.png
-
-scripts/
-├── build.sh                     # Build + bundle + codesign
-├── generate-logo-png.swift      # Regenerate logo PNG from SVG
+scripts/                         # Shared tooling
 └── mock-server.py               # Local mock API for development
 ```
 
