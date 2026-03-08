@@ -96,23 +96,6 @@ class NotificationService: ObservableObject {
         if thresholdExtra > 0 { requestPermission() }
     }
 
-    func sendTestNotification() {
-        guard Bundle.main.bundleIdentifier != nil else {
-            print("[Notification] No bundle identifier")
-            return
-        }
-        let center = UNUserNotificationCenter.current()
-        center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
-            print("[Notification] Permission granted: \(granted), error: \(String(describing: error))")
-            center.getNotificationSettings { settings in
-                print("[Notification] Authorization status: \(settings.authorizationStatus.rawValue), alert: \(settings.alertSetting.rawValue), sound: \(settings.soundSetting.rawValue)")
-                DispatchQueue.main.async {
-                    self.sendNotification(window: "Test", pct: 50)
-                }
-            }
-        }
-    }
-
     func requestPermission() {
         guard Bundle.main.bundleIdentifier != nil else { return }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
