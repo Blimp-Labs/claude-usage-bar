@@ -79,7 +79,8 @@ History is buffered in memory and flushed to disk every 5 minutes and on app qui
 ```sh
 make build          # release build only
 make app            # build + create .app bundle
-make zip            # build + bundle + zip for distribution
+make zip            # build + bundle + zip + verify distribution artifact
+make verify-release # inspect the packaged zip artifact
 make install        # build + install to /Applications
 make clean          # remove build artifacts
 ```
@@ -89,6 +90,7 @@ make clean          # remove build artifacts
 This repo now uses a tag-driven release flow. Pushing a `v*` tag will:
 
 - build `ClaudeUsageBar.zip`
+- verify the extracted zip contains the expected app bundle resources and updater framework
 - create the GitHub Release
 - reuse GitHub-generated release notes for both the GitHub Release and the Sparkle update entry
 - generate a signed Sparkle `appcast.xml` from that exact zip

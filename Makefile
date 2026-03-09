@@ -1,4 +1,4 @@
-.PHONY: build app zip install clean
+.PHONY: build app zip verify-release install clean
 
 build:
 	cd macos && swift build -c release
@@ -8,6 +8,10 @@ app:
 
 zip:
 	bash macos/scripts/build.sh --zip
+	bash macos/scripts/verify-release.sh macos/ClaudeUsageBar.zip
+
+verify-release:
+	bash macos/scripts/verify-release.sh
 
 install: app
 	rm -rf /Applications/ClaudeUsageBar.app

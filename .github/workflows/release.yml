@@ -22,6 +22,7 @@ jobs:
       - name: Build release archive
         env:
           REPOSITORY_NAME: ${{ github.event.repository.name }}
+          EXPECT_FEED_URL: '1'
         run: |
           version="${GITHUB_REF_NAME#v}"
           owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
