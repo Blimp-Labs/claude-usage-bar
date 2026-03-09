@@ -15,14 +15,14 @@ jobs:
       - name: Build release binary
         run: cd macos && swift build -c release
 
-      - name: Build .app bundle
-        run: make app
-
       - name: Run tests
         run: cd macos && swift test
+
+      - name: Build app archive
+        run: make zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ClaudeUsageBar.app
-          path: macos/ClaudeUsageBar.app
+          name: ClaudeUsageBar.zip
+          path: macos/ClaudeUsageBar.zip
