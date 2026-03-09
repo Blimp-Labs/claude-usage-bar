@@ -143,11 +143,28 @@ struct PopoverView: View {
     }
 
     private var settingsButton: some View {
-        SettingsLink {
-            Text("Settings…")
+        Button("Settings…") {
+            openSettingsWindow()
         }
         .buttonStyle(.borderless)
         .font(.caption)
+    }
+}
+
+@MainActor
+private func openSettingsWindow() {
+    NSApp.activate(ignoringOtherApps: true)
+
+    let opened = NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+    if opened == false {
+        _ = NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
+    }
+
+    DispatchQueue.main.async {
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = NSApp.windows.last(where: { $0.isVisible && $0.canBecomeKey }) {
+            window.makeKeyAndOrderFront(nil)
+        }
     }
 }
 
