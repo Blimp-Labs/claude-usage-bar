@@ -317,7 +317,7 @@ class UsageService: ObservableObject {
     }
 
     /// Try reading the email from Claude Code's local config as a fallback.
-    private static func loadLocalProfile() -> String? {
+    nonisolated private static func loadLocalProfile() -> String? {
         let url = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".claude.json")
         guard let data = try? Data(contentsOf: url),
