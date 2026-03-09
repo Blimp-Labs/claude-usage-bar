@@ -6,7 +6,6 @@ struct PopoverView: View {
     @ObservedObject var notificationService: NotificationService
     @ObservedObject var appUpdater: AppUpdater
     @AppStorage("setupComplete") private var setupComplete = false
-    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -144,9 +143,8 @@ struct PopoverView: View {
     }
 
     private var settingsButton: some View {
-        Button("Settings…") {
-            NSApp.activate(ignoringOtherApps: true)
-            openSettings()
+        SettingsLink {
+            Text("Settings…")
         }
         .buttonStyle(.borderless)
         .font(.caption)
