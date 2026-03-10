@@ -31,7 +31,9 @@ struct UsageChartView: View {
 
     @ViewBuilder
     private func chartView(points: [UsageDataPoint]) -> some View {
-        let interpolated = hoverDate.flatMap { interpolateValues(at: $0, in: points) }
+        let interpolated = hoverDate.flatMap {
+            UsageChartInterpolation.interpolateValues(at: $0, in: points)
+        }
 
         Chart {
             ForEach(points) { point in
@@ -148,59 +150,6 @@ struct UsageChartView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 4))
     }
 
-    // MARK: - Interpolation
-
-    private struct InterpolatedValues {
-        let date: Date
-        let pct5h: Double
-        let pct7d: Double
-    }
-
-    private func catmullRom(_ p0: Double, _ p1: Double, _ p2: Double, _ p3: Double, t: Double) -> Double {
-        let t2 = t * t
-        let t3 = t2 * t
-        return 0.5 * (
-            (2 * p1) +
-            (-p0 + p2) * t +
-            (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 +
-            (-p0 + 3 * p1 - 3 * p2 + p3) * t3
-        )
-    }
-
-    private func interpolateValues(at date: Date, in points: [UsageDataPoint]) -> InterpolatedValues? {
-        guard points.count >= 2 else { return nil }
-
-        let sorted = points.sorted { $0.timestamp < $1.timestamp }
-
-        if date < sorted.first!.timestamp || date > sorted.last!.timestamp {
-            return InterpolatedValues(date: date, pct5h: 0, pct7d: 0)
-        }
-
-        for i in 0..<(sorted.count - 1) {
-            if date >= sorted[i].timestamp && date <= sorted[i + 1].timestamp {
-                let span = sorted[i + 1].timestamp.timeIntervalSince(sorted[i].timestamp)
-                let t = span > 0 ? date.timeIntervalSince(sorted[i].timestamp) / span : 0
-
-                // Four control points, clamping at boundaries
-                let i0 = max(0, i - 1)
-                let i3 = min(sorted.count - 1, i + 2)
-
-                let pct5h = catmullRom(
-                    sorted[i0].pct5h, sorted[i].pct5h,
-                    sorted[i + 1].pct5h, sorted[i3].pct5h, t: t
-                )
-                let pct7d = catmullRom(
-                    sorted[i0].pct7d, sorted[i].pct7d,
-                    sorted[i + 1].pct7d, sorted[i3].pct7d, t: t
-                )
-
-                return InterpolatedValues(date: date, pct5h: pct5h, pct7d: pct7d)
-            }
-        }
-
-        return nil
-    }
-
     // MARK: - Formatting
 
     private var xAxisFormat: Date.FormatStyle {
@@ -225,5 +174,65 @@ struct UsageChartView: View {
         case .day30:
             return .dateTime.month(.abbreviated).day().hour()
         }
+    }
+}
+
+struct UsageChartInterpolatedValues {
+    let date: Date
+    let pct5h: Double
+    let pct7d: Double
+}
+
+enum UsageChartInterpolation {
+    static func catmullRom(_ p0: Double, _ p1: Double, _ p2: Double, _ p3: Double, t: Double) -> Double {
+        let t2 = t * t
+        let t3 = t2 * t
+        return 0.5 * (
+            (2 * p1) +
+            (-p0 + p2) * t +
+            (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 +
+            (-p0 + 3 * p1 - 3 * p2 + p3) * t3
+        )
+    }
+
+    static func interpolateValues(at date: Date, in points: [UsageDataPoint]) -> UsageChartInterpolatedValues? {
+        guard points.count >= 2 else { return nil }
+
+        let sorted = points.sorted { $0.timestamp < $1.timestamp }
+
+        if date < sorted.first!.timestamp || date > sorted.last!.timestamp {
+            return UsageChartInterpolatedValues(date: date, pct5h: 0, pct7d: 0)
+        }
+
+        for i in 0..<(sorted.count - 1) {
+            if date >= sorted[i].timestamp && date <= sorted[i + 1].timestamp {
+                let span = sorted[i + 1].timestamp.timeIntervalSince(sorted[i].timestamp)
+                let t = span > 0 ? date.timeIntervalSince(sorted[i].timestamp) / span : 0
+
+                let i0 = max(0, i - 1)
+                let i3 = min(sorted.count - 1, i + 2)
+
+                let pct5h = catmullRom(
+                    sorted[i0].pct5h, sorted[i].pct5h,
+                    sorted[i + 1].pct5h, sorted[i3].pct5h, t: t
+                )
+                let pct7d = catmullRom(
+                    sorted[i0].pct7d, sorted[i].pct7d,
+                    sorted[i + 1].pct7d, sorted[i3].pct7d, t: t
+                )
+
+                return UsageChartInterpolatedValues(
+                    date: date,
+                    pct5h: clampToUnitInterval(pct5h),
+                    pct7d: clampToUnitInterval(pct7d)
+                )
+            }
+        }
+
+        return nil
+    }
+
+    private static func clampToUnitInterval(_ value: Double) -> Double {
+        min(max(value, 0), 1)
     }
 }
