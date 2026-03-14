@@ -52,11 +52,19 @@ class UsageService: ObservableObject {
     private var oauthState: String?
 
     // File-based token storage (avoids Keychain prompts for unsigned binaries)
-    private static var tokenFileURL: URL {
+    private static var configDir: URL {
         let dir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".config/claude-usage-bar", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("token")
+        return dir
+    }
+
+    private static var tokenFileURL: URL {
+        configDir.appendingPathComponent("token")
+    }
+
+    private static var refreshTokenFileURL: URL {
+        configDir.appendingPathComponent("refresh_token")
     }
 
     var pct5h: Double { (usage?.fiveHour?.utilization ?? 0) / 100.0 }
@@ -176,6 +184,9 @@ class UsageService: ObservableObject {
             }
 
             saveToken(accessToken)
+            if let refreshToken = json["refresh_token"] as? String {
+                saveRefreshToken(refreshToken)
+            }
             isAuthenticated = true
             isAwaitingCode = false
             lastError = nil
@@ -209,7 +220,44 @@ class UsageService: ObservableObject {
         return Data(hash).base64URLEncoded()
     }
 
+    // MARK: - Token Refresh
+
+    private func refreshAccessToken() async -> Bool {
+        guard let refreshToken = loadRefreshToken() else { return false }
+
+        var request = URLRequest(url: tokenEndpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let body: [String: String] = [
+            "grant_type": "refresh_token",
+            "refresh_token": refreshToken,
+            "client_id": clientId,
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                return false
+            }
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let newAccessToken = json["access_token"] as? String else {
+                return false
+            }
+            saveToken(newAccessToken)
+            if let newRefreshToken = json["refresh_token"] as? String {
+                saveRefreshToken(newRefreshToken)
+            }
+            return true
+        } catch {
+            return false
+        }
+    }
+
     // MARK: - API Fetch
+
+    private var isRefreshing = false
 
     func fetchUsage() async {
         guard let token = loadToken() else {
@@ -229,6 +277,15 @@ class UsageService: ObservableObject {
                 return
             }
             if http.statusCode == 401 {
+                if !isRefreshing {
+                    isRefreshing = true
+                    let refreshed = await refreshAccessToken()
+                    isRefreshing = false
+                    if refreshed {
+                        await fetchUsage()
+                        return
+                    }
+                }
                 lastError = "Session expired — please sign in again"
                 signOut()
                 return
@@ -266,21 +323,36 @@ class UsageService: ObservableObject {
     // MARK: - File-based token storage
 
     private func saveToken(_ token: String) {
-        let url = Self.tokenFileURL
-        try? Data(token.utf8).write(to: url, options: .atomic)
-        // Restrict permissions to owner-only (0600)
-        try? FileManager.default.setAttributes(
-            [.posixPermissions: 0o600], ofItemAtPath: url.path)
+        writeSecureFile(Self.tokenFileURL, content: token)
+    }
+
+    private func saveRefreshToken(_ token: String) {
+        writeSecureFile(Self.refreshTokenFileURL, content: token)
     }
 
     private func loadToken() -> String? {
-        guard let data = try? Data(contentsOf: Self.tokenFileURL) else { return nil }
-        let token = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return token?.isEmpty == false ? token : nil
+        readSecureFile(Self.tokenFileURL)
+    }
+
+    private func loadRefreshToken() -> String? {
+        readSecureFile(Self.refreshTokenFileURL)
     }
 
     private func deleteToken() {
         try? FileManager.default.removeItem(at: Self.tokenFileURL)
+        try? FileManager.default.removeItem(at: Self.refreshTokenFileURL)
+    }
+
+    private func writeSecureFile(_ url: URL, content: String) {
+        try? Data(content.utf8).write(to: url, options: .atomic)
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
+    private func readSecureFile(_ url: URL) -> String? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        let value = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value?.isEmpty == false ? value : nil
     }
 }
 
