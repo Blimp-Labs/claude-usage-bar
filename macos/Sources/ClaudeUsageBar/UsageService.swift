@@ -149,7 +149,15 @@ class UsageService: ObservableObject {
         let parts = rawCode.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "#", maxSplits: 1)
         let code = String(parts[0])
 
-        if parts.count > 1 {
+        // State validation is mandatory when an OAuth flow is pending
+        if oauthState != nil {
+            guard parts.count > 1 else {
+                lastError = "Missing OAuth state — expected code#state format"
+                isAwaitingCode = false
+                codeVerifier = nil
+                oauthState = nil
+                return
+            }
             let returnedState = String(parts[1])
             guard returnedState == oauthState else {
                 lastError = "OAuth state mismatch — try again"

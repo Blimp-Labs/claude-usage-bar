@@ -276,7 +276,7 @@ final class UsageServiceTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return StoredCredentialsStore(directoryURL: directory)
+        return StoredCredentialsStore(directoryURL: directory, useKeychain: false)
     }
 
     private func makeSession() -> URLSession {

@@ -10,6 +10,7 @@ ZIP_PATH="$PROJECT_DIR/$APP_NAME.zip"
 DMG_PATH="$PROJECT_DIR/$APP_NAME.dmg"
 CREATE_DMG_VERSION="v1.2.3"
 CREATE_DMG_TARBALL_URL="https://github.com/create-dmg/create-dmg/archive/refs/tags/${CREATE_DMG_VERSION}.tar.gz"
+CREATE_DMG_SHA256="8cf7b4ae540801171f4f630f1f2956913aaa87483b7ac03458f52b6cd0c48953"
 DMG_RESOURCES_DIR="$PROJECT_DIR/Resources/dmg"
 DMG_BACKGROUND_SOURCE="$DMG_RESOURCES_DIR/background.png"
 APP_ICON_SOURCE="$PROJECT_DIR/Resources/AppIcon.icns"
@@ -187,7 +188,22 @@ create_dmg() {
 
     ditto "$APP_BUNDLE" "$staging_dir/$APP_NAME.app"
     create_applications_alias "$staging_dir"
-    curl -fsSL "$CREATE_DMG_TARBALL_URL" | tar -xzf - -C "$create_dmg_root" --strip-components=1
+    local tarball
+    tarball="$(mktemp "${TMPDIR:-/tmp}/create-dmg-tarball.XXXXXX.tar.gz")"
+    curl -fsSL "$CREATE_DMG_TARBALL_URL" -o "$tarball"
+
+    local actual_sha256
+    actual_sha256="$(shasum -a 256 "$tarball" | awk '{print $1}')"
+    if [[ "$actual_sha256" != "$CREATE_DMG_SHA256" ]]; then
+        echo "Error: create-dmg tarball SHA256 mismatch!"
+        echo "  expected: $CREATE_DMG_SHA256"
+        echo "  actual:   $actual_sha256"
+        rm -f "$tarball"
+        exit 1
+    fi
+
+    tar -xzf "$tarball" -C "$create_dmg_root" --strip-components=1
+    rm -f "$tarball"
     chmod +x "$create_dmg_tool"
 
     create_dmg_args=(

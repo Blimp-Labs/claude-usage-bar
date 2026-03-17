@@ -74,7 +74,9 @@ class UsageHistoryService: ObservableObject {
         history.dataPoints = pruned(history.dataPoints)
 
         guard let data = try? JSONEncoder.historyEncoder.encode(history) else { return }
-        try? data.write(to: Self.historyFileURL, options: .atomic)
+        let url = Self.historyFileURL
+        try? data.write(to: url, options: .atomic)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
 
         isDirty = false
         flushTimer?.cancel()
