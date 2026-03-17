@@ -69,15 +69,18 @@ struct StoredCredentialsStore {
         // 2. Try file-based credentials (migration path)
         if let data = try? Data(contentsOf: credentialsFileURL),
            let credentials = try? Self.decoder.decode(StoredCredentials.self, from: data) {
-            // Migrate to Keychain if available
             if useKeychain {
-                try? saveToKeychain(data)
-                try? fileManager.removeItem(at: credentialsFileURL)
+                do {
+                    try saveToKeychain(data)
+                    try? fileManager.removeItem(at: credentialsFileURL)
+                } catch {
+                    // Keychain failed — keep the file as fallback
+                }
             }
             return credentials
         }
 
-        // 3. Try legacy plaintext token file
+        // 3. Try legacy plaintext token file — migrate to Keychain on success
         guard let data = try? Data(contentsOf: legacyTokenFileURL),
               let token = String(data: data, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
@@ -85,12 +88,23 @@ struct StoredCredentialsStore {
             return nil
         }
 
-        return StoredCredentials(
+        let credentials = StoredCredentials(
             accessToken: token,
             refreshToken: nil,
             expiresAt: nil,
             scopes: defaultScopes
         )
+
+        if useKeychain, let encoded = try? Self.encoder.encode(credentials) {
+            do {
+                try saveToKeychain(encoded)
+                try? fileManager.removeItem(at: legacyTokenFileURL)
+            } catch {
+                // Keychain failed — keep the legacy file as fallback
+            }
+        }
+
+        return credentials
     }
 
     func delete() {

@@ -272,6 +272,35 @@ final class UsageServiceTests: XCTestCase {
         XCTAssertEqual(saved.refreshToken, "refresh-new")
     }
 
+    func testSubmitOAuthCodeRejectsMissingState() async throws {
+        let store = try makeStore()
+        let tokenURL = URL(string: "https://example.com/v1/oauth/token")!
+
+        MockURLProtocol.handler = { request in
+            XCTFail("No network request should be made when state is missing")
+            return try Self.httpResponse(url: request.url!, statusCode: 500)
+        }
+
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: URL(string: "https://example.com/api/oauth/usage")!,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: tokenURL,
+            credentialsStore: store
+        )
+
+        // Start an OAuth flow so oauthState is set
+        service.startOAuthFlow()
+        XCTAssertTrue(service.isAwaitingCode)
+
+        // Submit code WITHOUT #state — should be rejected
+        await service.submitOAuthCode("some-auth-code")
+
+        XCTAssertFalse(service.isAwaitingCode)
+        XCTAssertFalse(service.isAuthenticated)
+        XCTAssertEqual(service.lastError, "Missing OAuth state — expected code#state format")
+    }
+
     private func makeStore() throws -> StoredCredentialsStore {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
