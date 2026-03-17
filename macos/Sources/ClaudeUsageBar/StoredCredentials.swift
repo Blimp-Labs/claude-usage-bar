@@ -11,9 +11,14 @@ struct StoredCredentials: Codable, Equatable {
         return refreshToken.isEmpty == false
     }
 
-    func needsRefresh(at now: Date = Date(), leeway: TimeInterval = 60) -> Bool {
+    func needsRefresh(at now: Date = Date(), leeway: TimeInterval = 300) -> Bool {
         guard hasRefreshToken, let expiresAt else { return false }
         return expiresAt <= now.addingTimeInterval(leeway)
+    }
+
+    func isExpired(at now: Date = Date()) -> Bool {
+        guard let expiresAt else { return false }
+        return expiresAt <= now
     }
 }
 
