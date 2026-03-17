@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 struct StoredCredentials: Codable, Equatable {
     let accessToken: String
@@ -19,6 +20,9 @@ struct StoredCredentials: Codable, Equatable {
 
 struct StoredCredentialsStore {
     private let fileManager: FileManager
+    private let useKeychain: Bool
+    private let keychainService: String
+    private let keychainAccount: String
     let directoryURL: URL
     let credentialsFileURL: URL
     let legacyTokenFileURL: URL
@@ -26,28 +30,59 @@ struct StoredCredentialsStore {
     init(
         directoryURL: URL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".config/claude-usage-bar", isDirectory: true),
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        useKeychain: Bool = true,
+        keychainService: String = "claude-usage-bar",
+        keychainAccount: String = "credentials"
     ) {
         self.fileManager = fileManager
+        self.useKeychain = useKeychain
+        self.keychainService = keychainService
+        self.keychainAccount = keychainAccount
         self.directoryURL = directoryURL
         self.credentialsFileURL = directoryURL.appendingPathComponent("credentials.json")
         self.legacyTokenFileURL = directoryURL.appendingPathComponent("token")
     }
 
     func save(_ credentials: StoredCredentials) throws {
-        try ensureDirectoryExists()
         let data = try Self.encoder.encode(credentials)
-        try data.write(to: credentialsFileURL, options: .atomic)
-        try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: credentialsFileURL.path)
+
+        if useKeychain {
+            try saveToKeychain(data)
+            // Remove file-based credentials after successful Keychain save
+            try? fileManager.removeItem(at: credentialsFileURL)
+        } else {
+            try ensureDirectoryExists()
+            try data.write(to: credentialsFileURL, options: .atomic)
+            try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: credentialsFileURL.path)
+        }
         try? fileManager.removeItem(at: legacyTokenFileURL)
     }
 
     func load(defaultScopes: [String]) -> StoredCredentials? {
-        if let data = try? Data(contentsOf: credentialsFileURL),
+        // 1. Try Keychain first
+        if useKeychain, let data = loadFromKeychain(),
            let credentials = try? Self.decoder.decode(StoredCredentials.self, from: data) {
             return credentials
         }
 
+        // 2. Try file-based credentials (migration path)
+        // Note: concurrent callers may both attempt migration; the second Keychain
+        // write is an idempotent update and the second file removal is a no-op.
+        if let data = try? Data(contentsOf: credentialsFileURL),
+           let credentials = try? Self.decoder.decode(StoredCredentials.self, from: data) {
+            if useKeychain {
+                do {
+                    try saveToKeychain(data)
+                    try? fileManager.removeItem(at: credentialsFileURL)
+                } catch {
+                    // Keychain failed — keep the file as fallback
+                }
+            }
+            return credentials
+        }
+
+        // 3. Try legacy plaintext token file — migrate to Keychain on success
         guard let data = try? Data(contentsOf: legacyTokenFileURL),
               let token = String(data: data, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
@@ -55,18 +90,88 @@ struct StoredCredentialsStore {
             return nil
         }
 
-        return StoredCredentials(
+        let credentials = StoredCredentials(
             accessToken: token,
             refreshToken: nil,
             expiresAt: nil,
             scopes: defaultScopes
         )
+
+        if useKeychain, let encoded = try? Self.encoder.encode(credentials) {
+            do {
+                try saveToKeychain(encoded)
+                try? fileManager.removeItem(at: legacyTokenFileURL)
+            } catch {
+                // Keychain failed — keep the legacy file as fallback
+            }
+        }
+
+        return credentials
     }
 
     func delete() {
+        if useKeychain {
+            deleteFromKeychain()
+        }
         try? fileManager.removeItem(at: credentialsFileURL)
         try? fileManager.removeItem(at: legacyTokenFileURL)
     }
+
+    // MARK: - Keychain Operations
+
+    private func keychainQuery() -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: keychainAccount,
+        ]
+    }
+
+    private func saveToKeychain(_ data: Data) throws {
+        let query = keychainQuery()
+
+        // Try update first, then add
+        let attributes: [String: Any] = [kSecValueData as String: data]
+        var status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+
+        if status == errSecItemNotFound {
+            var addQuery = query
+            addQuery[kSecValueData as String] = data
+            status = SecItemAdd(addQuery as CFDictionary, nil)
+        }
+
+        guard status == errSecSuccess else {
+            throw NSError(
+                domain: NSOSStatusErrorDomain,
+                code: Int(status),
+                userInfo: [NSLocalizedDescriptionKey: "Keychain save failed (OSStatus \(status))"]
+            )
+        }
+    }
+
+    private func loadFromKeychain() -> Data? {
+        var query = keychainQuery()
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+
+        guard status == errSecSuccess else { return nil }
+        return result as? Data
+    }
+
+    @discardableResult
+    private func deleteFromKeychain() -> Bool {
+        let status = SecItemDelete(keychainQuery() as CFDictionary)
+        if status != errSecSuccess && status != errSecItemNotFound {
+            NSLog("Keychain delete failed (OSStatus %d)", status)
+            return false
+        }
+        return true
+    }
+
+    // MARK: - File Helpers
 
     private func ensureDirectoryExists() throws {
         try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
