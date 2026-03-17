@@ -10,6 +10,7 @@ ZIP_PATH="$PROJECT_DIR/$APP_NAME.zip"
 DMG_PATH="$PROJECT_DIR/$APP_NAME.dmg"
 CREATE_DMG_VERSION="v1.2.3"
 CREATE_DMG_TARBALL_URL="https://github.com/create-dmg/create-dmg/archive/refs/tags/${CREATE_DMG_VERSION}.tar.gz"
+# Update this hash whenever CREATE_DMG_VERSION is changed
 CREATE_DMG_SHA256="8cf7b4ae540801171f4f630f1f2956913aaa87483b7ac03458f52b6cd0c48953"
 DMG_RESOURCES_DIR="$PROJECT_DIR/Resources/dmg"
 DMG_BACKGROUND_SOURCE="$DMG_RESOURCES_DIR/background.png"

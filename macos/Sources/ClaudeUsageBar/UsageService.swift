@@ -22,6 +22,7 @@ class UsageService: ObservableObject {
     private let tokenEndpoint: URL
     private let credentialsStore: StoredCredentialsStore
     private let localProfileLoader: @MainActor () -> String?
+    private let urlOpener: @MainActor (URL) -> Bool
     private var currentInterval: TimeInterval
     private var refreshTask: Task<Bool, Never>?
 
@@ -77,7 +78,8 @@ class UsageService: ObservableObject {
         tokenEndpoint: URL = UsageService.defaultTokenEndpoint,
         redirectUri: String = UsageService.defaultRedirectURI,
         credentialsStore: StoredCredentialsStore = StoredCredentialsStore(),
-        localProfileLoader: @MainActor @escaping () -> String? = UsageService.loadLocalProfile
+        localProfileLoader: @MainActor @escaping () -> String? = UsageService.loadLocalProfile,
+        urlOpener: @MainActor @escaping (URL) -> Bool = { NSWorkspace.shared.open($0) }
     ) {
         self.session = session
         self.usageEndpoint = usageEndpoint
@@ -86,6 +88,7 @@ class UsageService: ObservableObject {
         self.redirectUri = redirectUri
         self.credentialsStore = credentialsStore
         self.localProfileLoader = localProfileLoader
+        self.urlOpener = urlOpener
         let stored = UserDefaults.standard.integer(forKey: "pollingMinutes")
         let minutes = Self.pollingOptions.contains(stored) ? stored : Self.defaultPollingMinutes
         self.pollingMinutes = minutes
@@ -139,7 +142,13 @@ class UsageService: ObservableObject {
         ]
 
         if let url = components.url {
-            NSWorkspace.shared.open(url)
+            guard urlOpener(url) else {
+                codeVerifier = nil
+                oauthState = nil
+                isAwaitingCode = false
+                lastError = "Could not open Claude sign-in page"
+                return
+            }
             isAwaitingCode = true
         }
     }
