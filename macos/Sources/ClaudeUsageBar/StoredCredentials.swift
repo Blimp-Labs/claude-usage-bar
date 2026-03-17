@@ -67,6 +67,8 @@ struct StoredCredentialsStore {
         }
 
         // 2. Try file-based credentials (migration path)
+        // Note: concurrent callers may both attempt migration; the second Keychain
+        // write is an idempotent update and the second file removal is a no-op.
         if let data = try? Data(contentsOf: credentialsFileURL),
            let credentials = try? Self.decoder.decode(StoredCredentials.self, from: data) {
             if useKeychain {
@@ -122,6 +124,8 @@ struct StoredCredentialsStore {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: keychainService,
             kSecAttrAccount as String: keychainAccount,
+            // App may launch before unlock as a login item (SMAppService)
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
         ]
     }
 
@@ -160,7 +164,10 @@ struct StoredCredentialsStore {
     }
 
     private func deleteFromKeychain() {
-        SecItemDelete(keychainQuery() as CFDictionary)
+        let status = SecItemDelete(keychainQuery() as CFDictionary)
+        if status != errSecSuccess && status != errSecItemNotFound {
+            NSLog("Keychain delete failed (OSStatus %d)", status)
+        }
     }
 
     // MARK: - File Helpers
