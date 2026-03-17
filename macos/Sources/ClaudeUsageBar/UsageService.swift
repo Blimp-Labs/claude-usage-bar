@@ -2,7 +2,6 @@ import Foundation
 import Combine
 import CryptoKit
 import AppKit
-
 @MainActor
 class UsageService: ObservableObject {
     @Published var usage: UsageResponse?
@@ -23,7 +22,13 @@ class UsageService: ObservableObject {
     private let credentialsStore: StoredCredentialsStore
     private let localProfileLoader: @MainActor () -> String?
     private var currentInterval: TimeInterval
-    private var refreshTask: Task<Bool, Never>?
+    private enum RefreshResult {
+        case success
+        case permanentFailure
+        case transientFailure
+    }
+
+    private var refreshTask: Task<RefreshResult, Never>?
 
     static let defaultPollingMinutes = 30
     static let pollingOptions = [5, 15, 30, 60]
@@ -361,7 +366,20 @@ class UsageService: ObservableObject {
         }
 
         if initialCredentials.needsRefresh() {
-            _ = await refreshCredentials(force: true)
+            let refreshResult = await refreshCredentials(force: true)
+            if refreshResult != .success, initialCredentials.isExpired() {
+                switch refreshResult {
+                case .permanentFailure:
+                    if expireSessionOnAuthFailure {
+                        expireSession()
+                    }
+                case .transientFailure:
+                    lastError = "Token refresh failed — will retry"
+                case .success:
+                    break
+                }
+                return nil
+            }
         }
 
         let activeCredentials = loadCredentials() ?? initialCredentials
@@ -375,27 +393,40 @@ class UsageService: ObservableObject {
             return result
         }
 
-        guard await refreshCredentials(force: true),
-              let refreshedCredentials = loadCredentials() else {
+        let refreshResult = await refreshCredentials(force: true)
+        switch refreshResult {
+        case .success:
+            guard let refreshedCredentials = loadCredentials() else {
+                if expireSessionOnAuthFailure {
+                    expireSession()
+                }
+                return nil
+            }
+
+            result = try await performAuthorizedRequest(
+                token: refreshedCredentials.accessToken,
+                url: url
+            )
+
+            if result.1.statusCode == 401 {
+                if expireSessionOnAuthFailure {
+                    expireSession()
+                }
+                return nil
+            }
+
+            return result
+
+        case .permanentFailure:
             if expireSessionOnAuthFailure {
                 expireSession()
             }
             return nil
-        }
 
-        result = try await performAuthorizedRequest(
-            token: refreshedCredentials.accessToken,
-            url: url
-        )
-
-        if result.1.statusCode == 401 {
-            if expireSessionOnAuthFailure {
-                expireSession()
-            }
+        case .transientFailure:
+            lastError = "Token refresh failed — will retry"
             return nil
         }
-
-        return result
     }
 
     private func performAuthorizedRequest(
@@ -413,30 +444,30 @@ class UsageService: ObservableObject {
         return (data, http)
     }
 
-    private func refreshCredentials(force: Bool) async -> Bool {
+    private func refreshCredentials(force: Bool) async -> RefreshResult {
         if let refreshTask {
             return await refreshTask.value
         }
 
         let task = Task { [weak self] in
-            guard let self else { return false }
+            guard let self else { return RefreshResult.permanentFailure }
             return await self.performRefresh(force: force)
         }
         refreshTask = task
-        let refreshed = await task.value
+        let result = await task.value
         refreshTask = nil
-        return refreshed
+        return result
     }
 
-    private func performRefresh(force: Bool) async -> Bool {
+    private func performRefresh(force: Bool) async -> RefreshResult {
         guard let currentCredentials = loadCredentials(),
               let refreshToken = currentCredentials.refreshToken,
               refreshToken.isEmpty == false else {
-            return false
+            return .permanentFailure
         }
 
         if force == false, currentCredentials.needsRefresh() == false {
-            return true
+            return .success
         }
 
         var request = URLRequest(url: tokenEndpoint)
@@ -453,23 +484,47 @@ class UsageService: ObservableObject {
         }
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
+        let data: Data
+        let http: HTTPURLResponse
         do {
-            let (data, response) = try await session.data(for: request)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200,
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let updatedCredentials = credentials(
-                    from: json,
-                    fallback: currentCredentials
-                  ) else {
-                return false
+            let (responseData, response) = try await session.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                return .transientFailure
             }
-
-            try saveCredentials(updatedCredentials)
-            isAuthenticated = true
-            return true
+            data = responseData
+            http = httpResponse
         } catch {
-            return false
+            return .transientFailure
         }
+
+        guard http.statusCode == 200 else {
+            if http.statusCode >= 400, http.statusCode < 500 {
+                return .permanentFailure
+            }
+            return .transientFailure
+        }
+
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let updatedCredentials = credentials(
+                from: json,
+                fallback: currentCredentials
+              ) else {
+            return .transientFailure
+        }
+
+        do {
+            try saveCredentials(updatedCredentials)
+        } catch {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            do {
+                try saveCredentials(updatedCredentials)
+            } catch {
+                return .transientFailure
+            }
+        }
+
+        isAuthenticated = true
+        return .success
     }
 
     private func credentials(
