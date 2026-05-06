@@ -5,6 +5,12 @@ struct SettingsWindowContent: View {
     @ObservedObject var service: UsageService
     @ObservedObject var notificationService: NotificationService
 
+    @AppStorage(AppearanceDefaultsKey.showResetDivider) private var showResetDivider = false
+    @AppStorage(AppearanceDefaultsKey.coloredResetDivider) private var coloredResetDivider = true
+    @AppStorage(AppearanceDefaultsKey.showServiceStatus) private var showServiceStatus = false
+    @AppStorage(AppearanceDefaultsKey.showOverlayWhenOperational) private var showOverlayWhenOperational = false
+    @AppStorage(AppearanceDefaultsKey.statusPollMinutes) private var statusPollMinutes = StatusPollOptions.default
+
     var body: some View {
         Form {
             Section("General") {
@@ -39,6 +45,41 @@ struct SettingsWindowContent: View {
                 )
             }
 
+            // Appearance: control the reset-time divider visibility and coloring on the menubar icon.
+            // The divider shows when the usage bucket resets and changes color based on usage/time state.
+            Section("Appearance") {
+                // Toggle divider visibility on the menubar icon.
+                Toggle("Show reset time divider", isOn: $showResetDivider)
+                VStack(alignment: .leading, spacing: 4) {
+                    // Toggle colored mode (semantic colors) vs. neutral mode (gray).
+                    // Only meaningful when divider is shown, so disabled when divider is off.
+                    // Colored: orange (warning), dark orange (critical), red (in usage limit).
+                    // Neutral: always gray (secondary label color).
+                    Toggle("Colored status", isOn: $coloredResetDivider)
+                        .disabled(!showResetDivider)
+                    Text("Off uses a single neutral color.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            // Service Status: optional indicator that polls https://status.claude.com and tints
+            // the menubar Claude logo when Claude services are degraded. Default OFF.
+            Section("Service Status") {
+                Toggle("Show Claude service status", isOn: $showServiceStatus)
+                Toggle("Show non-operational statuses on menubar", isOn: $showOverlayWhenOperational)
+                    .disabled(!showServiceStatus)
+                Picker("Poll interval", selection: $statusPollMinutes) {
+                    ForEach(StatusPollOptions.minutes, id: \.self) { mins in
+                        Text("\(mins) min").tag(mins)
+                    }
+                }
+                .disabled(!showServiceStatus)
+                Text("Polls https://status.claude.com (no auth, public endpoint).")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
             if service.isAuthenticated {
                 Section("Account") {
                     if let email = service.accountEmail {
@@ -51,7 +92,7 @@ struct SettingsWindowContent: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 400)
+        .frame(minWidth: 400, maxWidth: 400, maxHeight: 600)
         .fixedSize(horizontal: false, vertical: true)
         .onAppear {
             focusSettingsWindow()

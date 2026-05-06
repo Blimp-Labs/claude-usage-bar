@@ -1,0 +1,21 @@
+{
+  "page": {"id": "tymt9n04zgry", "name": "Claude", "url": "https://status.claude.com", "time_zone": "Etc/UTC", "updated_at": "2026-05-06T08:41:02.090Z"},
+  "components": [
+    {"id": "rwppv331jlwc", "name": "claude.ai", "status": "major_outage", "created_at": "2023-07-11T17:52:24.275Z", "updated_at": "2026-05-04T14:27:54.551Z", "position": 1, "group_id": null, "page_id": "tymt9n04zgry", "group": false, "only_show_if_degraded": false},
+    {"id": "k8w3r06qmzrp", "name": "Claude API (api.anthropic.com)", "status": "major_outage", "created_at": "2023-07-11T17:53:10.880Z", "updated_at": "2026-05-04T14:27:54.577Z", "position": 3, "group_id": null, "page_id": "tymt9n04zgry", "group": false, "only_show_if_degraded": false},
+    {"id": "yyzkbfz2thpt", "name": "Claude Code", "status": "degraded_performance", "created_at": "2025-05-22T21:35:29.822Z", "updated_at": "2026-05-04T14:27:54.599Z", "position": 4, "group_id": null, "page_id": "tymt9n04zgry", "group": false, "only_show_if_degraded": false}
+  ],
+  "incidents": [
+    {
+      "id": "incident-001",
+      "name": "API errors in us-east-1",
+      "status": "investigating",
+      "impact": "critical",
+      "shortlink": "https://stspg.io/abc123",
+      "created_at": "2026-05-06T08:00:00.000Z",
+      "updated_at": "2026-05-06T08:30:00.000Z"
+    }
+  ],
+  "scheduled_maintenances": [],
+  "status": {"indicator": "critical", "description": "Major System Outage"}
+}

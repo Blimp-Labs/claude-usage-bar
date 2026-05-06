@@ -5,7 +5,10 @@ struct PopoverView: View {
     @ObservedObject var historyService: UsageHistoryService
     @ObservedObject var notificationService: NotificationService
     @ObservedObject var appUpdater: AppUpdater
+    /// Optional so existing tests / call sites that don't care about service status keep compiling.
+    var statusMonitor: StatusMonitor?
     @AppStorage("setupComplete") private var setupComplete = false
+    @AppStorage(AppearanceDefaultsKey.showServiceStatus) private var showServiceStatus = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -66,12 +69,14 @@ struct PopoverView: View {
     private var usageView: some View {
         UsageBucketRow(
             label: "5-Hour Window",
-            bucket: service.usage?.fiveHour
+            bucket: service.usage?.fiveHour,
+            windowSeconds: 5 * 3600
         )
 
         UsageBucketRow(
             label: "7-Day Window",
-            bucket: service.usage?.sevenDay
+            bucket: service.usage?.sevenDay,
+            windowSeconds: 7 * 24 * 3600
         )
 
         if let opus = service.usage?.sevenDayOpus,
@@ -80,9 +85,9 @@ struct PopoverView: View {
             Text("Per-Model (7 day)")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-            UsageBucketRow(label: "Opus", bucket: opus)
+            UsageBucketRow(label: "Opus", bucket: opus, windowSeconds: 7 * 24 * 3600)
             if let sonnet = service.usage?.sevenDaySonnet {
-                UsageBucketRow(label: "Sonnet", bucket: sonnet)
+                UsageBucketRow(label: "Sonnet", bucket: sonnet, windowSeconds: 7 * 24 * 3600)
             }
         }
 
@@ -119,11 +124,19 @@ struct PopoverView: View {
             Spacer()
         }
 
+        if showServiceStatus, let monitor = statusMonitor {
+            ServiceStatusSection(monitor: monitor)
+            Divider()
+        }
+        
         HStack(spacing: 12) {
             settingsButton
             Spacer()
             Button("Refresh") {
-                Task { await service.fetchUsage() }
+                Task { 
+                    await service.fetchUsage()
+                    await statusMonitor?.refresh()
+                }
             }
             .buttonStyle(.borderless)
             .font(.caption)
@@ -284,6 +297,10 @@ private struct CodeEntryView: View {
 private struct UsageBucketRow: View {
     let label: String
     let bucket: UsageBucket?
+    let windowSeconds: TimeInterval
+
+    @AppStorage(AppearanceDefaultsKey.showResetDivider) private var showResetDivider = false
+    @AppStorage(AppearanceDefaultsKey.coloredResetDivider) private var coloredResetDivider = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -295,8 +312,26 @@ private struct UsageBucketRow: View {
                     .font(.subheadline)
                     .monospacedDigit()
             }
-            ProgressView(value: (bucket?.utilization ?? 0) / 100.0, total: 1.0)
-                .tint(colorForPct((bucket?.utilization ?? 0) / 100.0))
+            ZStack(alignment: .leading) {
+                ProgressView(value: (bucket?.utilization ?? 0) / 100.0, total: 1.0)
+                    .tint(colorForPct((bucket?.utilization ?? 0) / 100.0))
+                if showResetDivider,
+                   bucket?.resetsAtDate != nil,
+                   let pos = bucket?.resetPosition(windowSeconds: windowSeconds, now: Date()),
+                   let usagePct = bucket?.utilization {
+                    // Calculate the divider state based on current usage and time remaining in the reset window.
+                    // pos (0...1): position where the divider is drawn (0 = left/start, 1 = right/end)
+                    // timeLeftFraction: how much of the reset window remains (1 = full window, 0 = reset is now)
+                    // Thresholds: state becomes "critical" at 80% usage, "warning" at 33% time remaining.
+                    // When both conditions are true, state is "inUsageLimit" (the highest alert).
+                    let timeLeftFraction = 1.0 - pos
+                    let state = resetIndicatorState(
+                        usagePct: usagePct,
+                        timeLeftFraction: timeLeftFraction
+                    )
+                    ResetIndicatorView(position: pos, state: state, colored: coloredResetDivider)
+                }
+            }
             if let resetDate = bucket?.resetsAtDate {
                 Text("Resets \(resetDate, style: .relative)")
                     .font(.caption2)
@@ -308,6 +343,30 @@ private struct UsageBucketRow: View {
     private var percentageText: String {
         guard let pct = bucket?.utilization else { return "—" }
         return "\(Int(round(pct)))%"
+    }
+}
+
+/// Renders the reset-time divider on the usage progress bar.
+/// The divider is a 2-point vertical line that indicates when the usage bucket resets (position)
+/// and which changes color based on usage intensity and time remaining (state).
+private struct ResetIndicatorView: View {
+    /// Normalized position (0...1) where the divider should be drawn: 0 = left edge, 1 = right edge.
+    /// Corresponds to how far through the reset window we are.
+    let position: Double
+    /// Current state of the divider (normal/warning/critical/inUsageLimit), driving the color.
+    let state: ResetIndicatorState
+    /// Whether to use semantic colors (orange/red) or a neutral gray. When false, all states render as .secondary.
+    let colored: Bool
+
+    var body: some View {
+        GeometryReader { geo in
+            Rectangle()
+                .fill(state.color(colored: colored))
+                .frame(width: 2)
+                .offset(x: geo.size.width * position - 1)
+                .accessibilityHidden(true)
+        }
+        .frame(height: 8)
     }
 }
 
@@ -367,8 +426,111 @@ private struct SetupThresholdSlider: View {
 
 private func colorForPct(_ pct: Double) -> Color {
     switch pct {
-    case ..<0.60: return .green
-    case 0.60..<0.80: return .yellow
-    default: return .red
+    case ..<0.60: .green
+    case 0.60..<0.80: .yellow
+    default: .red
+    }
+}
+
+// MARK: - Service Status section
+
+/// Display state for the popover Service Status block. Pure view-model so it can be unit-tested
+/// without spinning up SwiftUI.
+public enum ServiceStatusDisplayState: Equatable {
+    case loading
+    case unavailable
+    case ready(StatusSnapshot)
+
+    public static func make(snapshot: StatusSnapshot?, lastError: StatusError?) -> ServiceStatusDisplayState {
+        if let snapshot {
+            return .ready(snapshot)
+        }
+        if lastError != nil {
+            return .unavailable
+        }
+        return .loading
+    }
+}
+
+@MainActor
+struct ServiceStatusSection: View {
+    let monitor: StatusMonitor
+    private let statusPageURL = URL(string: "https://status.claude.com")!
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Service Status")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            switch ServiceStatusDisplayState.make(
+                snapshot: monitor.snapshot,
+                lastError: monitor.lastError
+            ) {
+            case .loading:
+                Text("Checking status…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            case .unavailable:
+                HStack {
+                    Label("Status unavailable", systemImage: "wifi.slash")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Retry") {
+                        Task { await monitor.refresh() }
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                }
+            case .ready(let snap):
+                ForEach(snap.allMonitoredComponents) { component in
+                    HStack {
+                        Circle()
+                            .fill(componentColor(component.status))
+                            .frame(width: 6, height: 6)
+                        Text(component.name)
+                            .font(.caption)
+                        Spacer()
+                        Text(humanReadable(component.status))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                ForEach(snap.activeIncidents) { incident in
+                    Label(incident.name, systemImage: "exclamationmark.triangle")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .lineLimit(2)
+                }
+            }
+
+            HStack {
+                Button("View status page") {
+                    NSWorkspace.shared.open(statusPageURL)
+                }
+                .buttonStyle(.borderless)
+                .font(.caption)
+                Spacer()
+            }
+        }
+    }
+
+    private func componentColor(_ status: ClaudeServiceStatus) -> Color {
+        switch status {
+        case .operational, .underMaintenance: return .green
+        case .degradedPerformance, .partialOutage: return .orange
+        case .majorOutage: return .red
+        }
+    }
+
+    private func humanReadable(_ status: ClaudeServiceStatus) -> String {
+        switch status {
+        case .operational: return "Operational"
+        case .underMaintenance: return "Under maintenance"
+        case .degradedPerformance: return "Degraded"
+        case .partialOutage: return "Partial outage"
+        case .majorOutage: return "Major outage"
+        }
     }
 }

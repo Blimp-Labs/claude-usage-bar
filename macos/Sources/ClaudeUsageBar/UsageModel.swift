@@ -55,6 +55,24 @@ struct UsageBucket: Codable {
         Self.parseResetDate(from: resetsAt)
     }
 
+    /// Seconds until `resetsAtDate`, or nil when the bucket has no reset date.
+    /// Returns negative values when the reset time is in the past — callers are
+    /// responsible for any clamping they need.
+    func secondsUntilReset(now: Date = Date()) -> TimeInterval? {
+        resetsAtDate.map { $0.timeIntervalSince(now) }
+    }
+
+    /// Position 0...1 of the reset moment within a sliding window of
+    /// `windowSeconds`. 0 means the reset is exactly one full window away;
+    /// 1 means the reset is now (or in the past). Returns nil when the bucket
+    /// has no reset date.
+    func resetPosition(windowSeconds: TimeInterval, now: Date = Date()) -> Double? {
+        guard let secsLeft = secondsUntilReset(now: now) else { return nil }
+        guard windowSeconds > 0 else { return nil }
+        let raw = 1.0 - (secsLeft / windowSeconds)
+        return min(max(0.0, raw), 1.0)
+    }
+
     func reconciled(with previous: UsageBucket?, resetInterval: TimeInterval, now: Date) -> UsageBucket {
         guard resetsAtDate == nil else { return self }
         guard let previousDate = previous?.resetsAtDate else { return self }
