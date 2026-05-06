@@ -67,7 +67,7 @@ struct SettingsWindowContent: View {
             // the menubar Claude logo when Claude services are degraded. Default OFF.
             Section("Service Status") {
                 Toggle("Show Claude service status", isOn: $showServiceStatus)
-                Toggle("Show non-operational statuses", isOn: $showOverlayWhenOperational)
+                Toggle("Show non-operational statuses on menubar", isOn: $showOverlayWhenOperational)
                     .disabled(!showServiceStatus)
                 Picker("Poll interval", selection: $statusPollMinutes) {
                     ForEach(StatusPollOptions.minutes, id: \.self) { mins in
@@ -92,7 +92,7 @@ struct SettingsWindowContent: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 400)
+        .frame(minWidth: 400, maxWidth: 400, maxHeight: 600)
         .fixedSize(horizontal: false, vertical: true)
         .onAppear {
             focusSettingsWindow()

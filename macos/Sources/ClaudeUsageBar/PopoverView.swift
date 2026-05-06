@@ -26,10 +26,6 @@ struct PopoverView: View {
                 } else {
                     usageView
                 }
-                if showServiceStatus, let monitor = statusMonitor {
-                    Divider()
-                    ServiceStatusSection(monitor: monitor)
-                }
             }
         }
         .padding()
@@ -128,11 +124,19 @@ struct PopoverView: View {
             Spacer()
         }
 
+        if showServiceStatus, let monitor = statusMonitor {
+            ServiceStatusSection(monitor: monitor)
+            Divider()
+        }
+        
         HStack(spacing: 12) {
             settingsButton
             Spacer()
             Button("Refresh") {
-                Task { await service.fetchUsage() }
+                Task { 
+                    await service.fetchUsage()
+                    await statusMonitor?.refresh()
+                }
             }
             .buttonStyle(.borderless)
             .font(.caption)
