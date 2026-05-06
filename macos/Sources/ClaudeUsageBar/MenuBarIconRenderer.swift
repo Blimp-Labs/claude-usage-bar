@@ -22,6 +22,42 @@ struct MenuBarIconParams {
     let state7d: ResetIndicatorState
     let showResetDivider: Bool
     let coloredResetDivider: Bool
+    /// Optional Claude-service-status tint. `nil` = no tint; logo renders as template.
+    /// When set, the Claude logo is tinted with `statusOverlay.color` to signal severity.
+    let statusOverlay: ServiceStatusOverlay?
+
+    init(
+        pct5h: Double,
+        pct7d: Double,
+        resetPos5h: Double?,
+        state5h: ResetIndicatorState,
+        resetPos7d: Double?,
+        state7d: ResetIndicatorState,
+        showResetDivider: Bool,
+        coloredResetDivider: Bool,
+        statusOverlay: ServiceStatusOverlay? = nil
+    ) {
+        self.pct5h = pct5h
+        self.pct7d = pct7d
+        self.resetPos5h = resetPos5h
+        self.state5h = state5h
+        self.resetPos7d = resetPos7d
+        self.state7d = state7d
+        self.showResetDivider = showResetDivider
+        self.coloredResetDivider = coloredResetDivider
+        self.statusOverlay = statusOverlay
+    }
+}
+
+/// Drives the tint applied to the Claude logo when a service incident is active.
+/// When present, the logo is rendered in non-template mode using `color` via `.sourceIn` compositing.
+/// `nil` = no tint; logo renders as a standard template image (system accent / dark-mode auto-invert).
+struct ServiceStatusOverlay: Equatable {
+    let color: NSColor
+
+    init(color: NSColor) {
+        self.color = color
+    }
 }
 
 private func drawLabel(_ label: String, x: CGFloat, barY: CGFloat, color: NSColor) {
@@ -39,7 +75,7 @@ func renderIcon(_ params: MenuBarIconParams) -> NSImage {
     // in dark mode. If the accent color is dark (unlikely but possible), we flip to white for contrast.
     // Colored mode (.isTemplate = false) uses semantic colors (orange, red) for warning/critical states,
     // overriding system colors for deliberate visual emphasis. Only applies when divider is shown AND colored is enabled.
-    let wantsColored = params.showResetDivider && params.coloredResetDivider
+    let wantsColored = (params.showResetDivider && params.coloredResetDivider) || params.statusOverlay != nil
     let baseColor: NSColor = wantsColored ? .labelColor : .white
 
     let image = NSImage(size: NSSize(width: iconWidth, height: iconHeight), flipped: true) { _ in
@@ -48,7 +84,8 @@ func renderIcon(_ params: MenuBarIconParams) -> NSImage {
         let topY = (iconHeight - barHeight * 2 - rowGap) / 2
         let bottomY = topY + barHeight + rowGap
 
-        drawClaudeLogo(x: .zero, y: (iconHeight - logoSize) / 2, size: logoSize, tint: wantsColored ? baseColor : nil)
+        let logoTint: NSColor? = params.statusOverlay?.color ?? (wantsColored ? baseColor : nil)
+        drawClaudeLogo(x: .zero, y: (iconHeight - logoSize) / 2, size: logoSize, tint: logoTint)
 
         drawLabel("5h", x: offset, barY: topY, color: baseColor)
         drawBar(x: barX, y: topY, width: barWidth, height: barHeight,
@@ -70,6 +107,7 @@ func renderIcon(_ params: MenuBarIconParams) -> NSImage {
 
         return true
     }
+    // Force non-template when a status tint is present so .systemOrange / .systemRed survive.
     image.isTemplate = !wantsColored
     return image
 }

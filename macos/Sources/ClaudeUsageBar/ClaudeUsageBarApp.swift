@@ -7,9 +7,15 @@ struct ClaudeUsageBarApp: App {
     @StateObject private var historyService = UsageHistoryService()
     @StateObject private var notificationService = NotificationService()
     @StateObject private var appUpdater = AppUpdater()
+    @State private var statusMonitor: StatusMonitor = {
+        StatusMonitor(client: StatusPageClient())
+    }()
 
     @AppStorage(AppearanceDefaultsKey.showResetDivider) private var showResetDivider = false
     @AppStorage(AppearanceDefaultsKey.coloredResetDivider) private var coloredResetDivider = true
+    @AppStorage(AppearanceDefaultsKey.showServiceStatus) private var showServiceStatus = false
+    @AppStorage(AppearanceDefaultsKey.showOverlayWhenOperational) private var showOverlayWhenOperational = false
+    @AppStorage(AppearanceDefaultsKey.statusPollMinutes) private var statusPollMinutes = StatusPollOptions.default
 
     var body: some Scene {
         MenuBarExtra {
@@ -17,7 +23,8 @@ struct ClaudeUsageBarApp: App {
                 service: service,
                 historyService: historyService,
                 notificationService: notificationService,
-                appUpdater: appUpdater
+                appUpdater: appUpdater,
+                statusMonitor: statusMonitor
             )
         } label: {
             Image(nsImage: iconImage())
@@ -30,6 +37,19 @@ struct ClaudeUsageBarApp: App {
                     service.historyService = historyService
                     service.notificationService = notificationService
                     service.startPolling()
+                    if showServiceStatus {
+                        statusMonitor.start()
+                    }
+                }
+                .onChange(of: showServiceStatus) { _, enabled in
+                    if enabled {
+                        statusMonitor.start()
+                    } else {
+                        statusMonitor.stop()
+                    }
+                }
+                .onChange(of: statusPollMinutes) { _, minutes in
+                    statusMonitor.updateInterval(minutes)
                 }
         }
         .menuBarExtraStyle(.window)
@@ -68,7 +88,25 @@ struct ClaudeUsageBarApp: App {
             resetPos7d: pos7,
             state7d: state7,
             showResetDivider: showResetDivider,
-            coloredResetDivider: coloredResetDivider
+            coloredResetDivider: coloredResetDivider,
+            statusOverlay: serviceStatusOverlay()
         ))
+    }
+
+    /// Map the current monitor snapshot to a renderer overlay. Returns nil when the feature flag
+    /// is off, the snapshot is missing, or the rollup is operational without the opt-in green toggle.
+    @MainActor
+    private func serviceStatusOverlay() -> ServiceStatusOverlay? {
+        guard showServiceStatus, let snap = statusMonitor.snapshot else { return nil }
+        return switch snap.rollup {
+        case .operational:      
+            nil
+        case .underMaintenance: 
+            ServiceStatusOverlay(color: .yellow)
+        case .degradedPerformance, .partialOutage:
+            ServiceStatusOverlay(color: .orange)
+        case .majorOutage:
+            ServiceStatusOverlay(color: .red)
+        }
     }
 }

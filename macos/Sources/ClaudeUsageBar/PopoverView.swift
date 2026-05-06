@@ -5,7 +5,10 @@ struct PopoverView: View {
     @ObservedObject var historyService: UsageHistoryService
     @ObservedObject var notificationService: NotificationService
     @ObservedObject var appUpdater: AppUpdater
+    /// Optional so existing tests / call sites that don't care about service status keep compiling.
+    var statusMonitor: StatusMonitor?
     @AppStorage("setupComplete") private var setupComplete = false
+    @AppStorage(AppearanceDefaultsKey.showServiceStatus) private var showServiceStatus = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -22,6 +25,10 @@ struct PopoverView: View {
                     signInView
                 } else {
                     usageView
+                }
+                if showServiceStatus, let monitor = statusMonitor {
+                    Divider()
+                    ServiceStatusSection(monitor: monitor)
                 }
             }
         }
@@ -415,8 +422,111 @@ private struct SetupThresholdSlider: View {
 
 private func colorForPct(_ pct: Double) -> Color {
     switch pct {
-    case ..<0.60: return .green
-    case 0.60..<0.80: return .yellow
-    default: return .red
+    case ..<0.60: .green
+    case 0.60..<0.80: .yellow
+    default: .red
+    }
+}
+
+// MARK: - Service Status section
+
+/// Display state for the popover Service Status block. Pure view-model so it can be unit-tested
+/// without spinning up SwiftUI.
+public enum ServiceStatusDisplayState: Equatable {
+    case loading
+    case unavailable
+    case ready(StatusSnapshot)
+
+    public static func make(snapshot: StatusSnapshot?, lastError: StatusError?) -> ServiceStatusDisplayState {
+        if let snapshot {
+            return .ready(snapshot)
+        }
+        if lastError != nil {
+            return .unavailable
+        }
+        return .loading
+    }
+}
+
+@MainActor
+struct ServiceStatusSection: View {
+    let monitor: StatusMonitor
+    private let statusPageURL = URL(string: "https://status.claude.com")!
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Service Status")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            switch ServiceStatusDisplayState.make(
+                snapshot: monitor.snapshot,
+                lastError: monitor.lastError
+            ) {
+            case .loading:
+                Text("Checking status…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            case .unavailable:
+                HStack {
+                    Label("Status unavailable", systemImage: "wifi.slash")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Retry") {
+                        Task { await monitor.refresh() }
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                }
+            case .ready(let snap):
+                ForEach(snap.allMonitoredComponents) { component in
+                    HStack {
+                        Circle()
+                            .fill(componentColor(component.status))
+                            .frame(width: 6, height: 6)
+                        Text(component.name)
+                            .font(.caption)
+                        Spacer()
+                        Text(humanReadable(component.status))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                ForEach(snap.activeIncidents) { incident in
+                    Label(incident.name, systemImage: "exclamationmark.triangle")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .lineLimit(2)
+                }
+            }
+
+            HStack {
+                Button("View status page") {
+                    NSWorkspace.shared.open(statusPageURL)
+                }
+                .buttonStyle(.borderless)
+                .font(.caption)
+                Spacer()
+            }
+        }
+    }
+
+    private func componentColor(_ status: ClaudeServiceStatus) -> Color {
+        switch status {
+        case .operational, .underMaintenance: return .green
+        case .degradedPerformance, .partialOutage: return .orange
+        case .majorOutage: return .red
+        }
+    }
+
+    private func humanReadable(_ status: ClaudeServiceStatus) -> String {
+        switch status {
+        case .operational: return "Operational"
+        case .underMaintenance: return "Under maintenance"
+        case .degradedPerformance: return "Degraded"
+        case .partialOutage: return "Partial outage"
+        case .majorOutage: return "Major outage"
+        }
     }
 }

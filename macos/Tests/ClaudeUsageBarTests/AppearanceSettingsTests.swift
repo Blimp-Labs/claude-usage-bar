@@ -57,6 +57,56 @@ final class AppearanceSettingsTests: XCTestCase {
         XCTAssertTrue(equalObjects(standardBefore, standardAfter))
     }
 
+    // MARK: - Service Status keys (DV-1.6)
+
+    func testServiceStatusKeyStringsAreStable() {
+        XCTAssertEqual(AppearanceDefaultsKey.showServiceStatus, "showServiceStatus")
+        XCTAssertEqual(AppearanceDefaultsKey.showOverlayWhenOperational, "showOverlayWhenOperational")
+        XCTAssertEqual(AppearanceDefaultsKey.statusPollMinutes, "statusPollMinutes")
+        XCTAssertEqual(AppearanceDefaultsKey.statusComponentFilter, "statusComponentFilter")
+    }
+
+    func testFreshSuiteShowServiceStatusDefaultsToFalse() throws {
+        let defaults = try makeIsolatedDefaults()
+        XCTAssertNil(defaults.object(forKey: AppearanceDefaultsKey.showServiceStatus))
+        XCTAssertFalse(defaults.bool(forKey: AppearanceDefaultsKey.showServiceStatus))
+    }
+
+    func testRoundTripShowServiceStatus() throws {
+        let defaults = try makeIsolatedDefaults()
+        defaults.set(true, forKey: AppearanceDefaultsKey.showServiceStatus)
+        XCTAssertTrue(defaults.bool(forKey: AppearanceDefaultsKey.showServiceStatus))
+        defaults.set(false, forKey: AppearanceDefaultsKey.showServiceStatus)
+        XCTAssertFalse(defaults.bool(forKey: AppearanceDefaultsKey.showServiceStatus))
+    }
+
+    func testStatusPollMinutesValidOptions() {
+        XCTAssertEqual(StatusPollOptions.minutes, [1, 5, 15, 30])
+        XCTAssertEqual(StatusPollOptions.default, 5)
+    }
+
+    func testStatusComponentFilterRoundTripJSON() throws {
+        let defaults = try makeIsolatedDefaults()
+        let original = StatusComponentFilter(substrings: ["foo", "Bar Baz"])
+        StatusComponentFilterStore.save(original, to: defaults)
+
+        let restored = StatusComponentFilterStore.load(from: defaults)
+        XCTAssertEqual(restored, original)
+    }
+
+    func testStatusComponentFilterMissingDataReturnsDefault() throws {
+        let defaults = try makeIsolatedDefaults()
+        let loaded = StatusComponentFilterStore.load(from: defaults)
+        XCTAssertEqual(loaded, .default)
+    }
+
+    func testStatusComponentFilterCorruptDataReturnsDefault() throws {
+        let defaults = try makeIsolatedDefaults()
+        defaults.set(Data("not json".utf8), forKey: AppearanceDefaultsKey.statusComponentFilter)
+        let loaded = StatusComponentFilterStore.load(from: defaults)
+        XCTAssertEqual(loaded, .default)
+    }
+
     // MARK: - Helpers
 
     private func makeIsolatedDefaults() throws -> UserDefaults {
