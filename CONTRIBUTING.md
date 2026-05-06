@@ -22,14 +22,23 @@ This builds the release binary via Swift Package Manager, bundles it as a `.app`
 
 ```
 Sources/ClaudeUsageBar/
-├── ClaudeUsageBarApp.swift      # App entry point, menu bar setup
-├── UsageService.swift           # OAuth, polling, API calls
-├── UsageModel.swift             # API response types
-├── UsageHistoryModel.swift      # History data types, time ranges
-├── UsageHistoryService.swift    # Persistence, downsampling
-├── UsageChartView.swift         # Swift Charts trajectory view
-├── PopoverView.swift            # Main popover UI
-└── MenuBarIconRenderer.swift    # Menu bar icon drawing
+├── ClaudeUsageBarApp.swift       # App entry point, menu bar setup
+├── UsageService.swift            # OAuth, polling, API calls
+├── UsageModel.swift              # API response types
+├── UsageHistoryModel.swift       # History data types, time ranges
+├── UsageHistoryService.swift     # Persistence, downsampling
+├── UsageChartView.swift          # Swift Charts trajectory view
+├── PopoverView.swift             # Main popover UI + reset indicator view
+├── MenuBarIconRenderer.swift     # Menu bar icon drawing + divider rendering
+├── SettingsView.swift            # Settings window + appearance toggles
+├── ResetIndicatorState.swift     # Enum for divider state + color mapping logic
+├── AppearanceSettings.swift      # UserDefaults keys for appearance settings
+├── NotificationService.swift     # Usage threshold notifications
+├── PollingOptionFormatter.swift  # Polling interval display labels
+├── AppUpdater.swift              # Sparkle update integration
+└── Resources/
+    ├── claude-logo.png           # Pre-rendered menu bar logo (512px)
+    └── en.lproj/Localizable.strings
 ```
 
 ## Build commands

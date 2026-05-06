@@ -34,6 +34,11 @@ private func drawLabel(_ label: String, x: CGFloat, barY: CGFloat, color: NSColo
 }
 
 func renderIcon(_ params: MenuBarIconParams) -> NSImage {
+    // Determine rendering mode: template (system accent color) or colored (semantic colors for warning/critical).
+    // Template mode (.isTemplate = true) is the default: the icon uses the system accent color and auto-inverts
+    // in dark mode. If the accent color is dark (unlikely but possible), we flip to white for contrast.
+    // Colored mode (.isTemplate = false) uses semantic colors (orange, red) for warning/critical states,
+    // overriding system colors for deliberate visual emphasis. Only applies when divider is shown AND colored is enabled.
     let wantsColored = params.showResetDivider && params.coloredResetDivider
     let baseColor: NSColor = wantsColored ? .labelColor : .white
 
@@ -126,6 +131,10 @@ private func drawDashedBar(x: CGFloat, y: CGFloat, width: CGFloat, height: CGFlo
     path.stroke()
 }
 
+// Draws the reset-time divider: a 1-point vertical line at the given position within the bar.
+// Extends 1 point above and below the bar (height: barHeight + 2) for visual centering and prominence,
+// even though the bar itself is only 5 points tall. This slight extension makes the divider more visible
+// in the compact 18x18 menubar icon.
 private func drawDivider(barX: CGFloat, barY: CGFloat, position: Double, color: NSColor) {
     let clamped = max(0.0, min(1.0, position))
     let lineWidth: CGFloat = 1

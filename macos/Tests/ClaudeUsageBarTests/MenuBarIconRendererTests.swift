@@ -2,6 +2,17 @@ import XCTest
 import AppKit
 @testable import ClaudeUsageBar
 
+/// Tests for menubar icon rendering: template vs. colored modes and divider behavior.
+///
+/// Template mode (isTemplate = true) renders as a monochrome icon using the system accent color,
+/// auto-inverting in dark mode. This is the default for backwards compatibility.
+///
+/// Colored mode (isTemplate = false) renders semantic colors (orange, red) for warning/critical states
+/// when the reset divider is enabled and colored mode is toggled on. This provides visual emphasis for
+/// high-usage alerts without relying on system colors.
+///
+/// The divider itself draws only when both `showResetDivider` and a reset position are present,
+/// but the template mode flip depends on `coloredResetDivider` being true (regardless of divider visibility).
 final class MenuBarIconRendererTests: XCTestCase {
 
     private let expectedSize = NSSize(width: 56, height: 18)

@@ -1,6 +1,11 @@
 import XCTest
 @testable import ClaudeUsageBar
 
+/// Tests for appearance setting persistence and key stability.
+///
+/// Validates that the `AppearanceDefaultsKey` enum maintains stable keys for UserDefaults,
+/// and that settings round-trip correctly (write → read returns same value).
+/// Uses isolated UserDefaults suites to avoid polluting system defaults.
 final class AppearanceSettingsTests: XCTestCase {
 
     func testKeyStringsAreStable() {

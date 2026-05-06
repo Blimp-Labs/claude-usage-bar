@@ -32,8 +32,21 @@ A tiny macOS menu bar app that shows your Claude API usage at a glance. Click it
 
 ## Unreleased
 
-- **Reset-time divider** — vertical indicator on progress bars showing when the next reset occurs; color reflects usage intensity (normal / warning / critical / in-usage-limit)
-- **Appearance settings** — toggle to show/hide the reset divider and enable colored status indicators
+### Reset-time divider & appearance settings
+
+A vertical divider on the usage progress bars shows when your usage bucket resets. The divider position indicates where in the reset window you are, and its color signals your usage intensity:
+
+- **Neutral** (gray) — normal state, plenty of time remaining
+- **Warning** (orange) — less than 33% of the reset window remaining
+- **Critical** (dark orange) — high usage (≥80%) in any time window
+- **In limit** (red) — both high usage AND late in the window (highest alert)
+
+The divider appears on both the 5-hour and 7-day usage bars in the popover.
+
+**Appearance settings** (in the app's Settings window):
+
+- **Show reset time divider** — toggle to hide the divider from the menu bar icon and popover
+- **Colored status** — toggle between semantic colors (above) and a neutral gray for all states; disabled when the divider is hidden
 
 ## Install
 

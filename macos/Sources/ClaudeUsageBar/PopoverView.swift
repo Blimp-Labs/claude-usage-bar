@@ -308,6 +308,11 @@ private struct UsageBucketRow: View {
                    bucket?.resetsAtDate != nil,
                    let pos = bucket?.resetPosition(windowSeconds: windowSeconds, now: Date()),
                    let usagePct = bucket?.utilization {
+                    // Calculate the divider state based on current usage and time remaining in the reset window.
+                    // pos (0...1): position where the divider is drawn (0 = left/start, 1 = right/end)
+                    // timeLeftFraction: how much of the reset window remains (1 = full window, 0 = reset is now)
+                    // Thresholds: state becomes "critical" at 80% usage, "warning" at 33% time remaining.
+                    // When both conditions are true, state is "inUsageLimit" (the highest alert).
                     let timeLeftFraction = 1.0 - pos
                     let state = resetIndicatorState(
                         usagePct: usagePct,
@@ -330,9 +335,16 @@ private struct UsageBucketRow: View {
     }
 }
 
+/// Renders the reset-time divider on the usage progress bar.
+/// The divider is a 2-point vertical line that indicates when the usage bucket resets (position)
+/// and which changes color based on usage intensity and time remaining (state).
 private struct ResetIndicatorView: View {
-    let position: Double          // 0...1
+    /// Normalized position (0...1) where the divider should be drawn: 0 = left edge, 1 = right edge.
+    /// Corresponds to how far through the reset window we are.
+    let position: Double
+    /// Current state of the divider (normal/warning/critical/inUsageLimit), driving the color.
     let state: ResetIndicatorState
+    /// Whether to use semantic colors (orange/red) or a neutral gray. When false, all states render as .secondary.
     let colored: Bool
 
     var body: some View {
