@@ -66,12 +66,14 @@ struct PopoverView: View {
     private var usageView: some View {
         UsageBucketRow(
             label: "5-Hour Window",
-            bucket: service.usage?.fiveHour
+            bucket: service.usage?.fiveHour,
+            windowSeconds: 5 * 3600
         )
 
         UsageBucketRow(
             label: "7-Day Window",
-            bucket: service.usage?.sevenDay
+            bucket: service.usage?.sevenDay,
+            windowSeconds: 7 * 24 * 3600
         )
 
         if let opus = service.usage?.sevenDayOpus,
@@ -80,9 +82,9 @@ struct PopoverView: View {
             Text("Per-Model (7 day)")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-            UsageBucketRow(label: "Opus", bucket: opus)
+            UsageBucketRow(label: "Opus", bucket: opus, windowSeconds: 7 * 24 * 3600)
             if let sonnet = service.usage?.sevenDaySonnet {
-                UsageBucketRow(label: "Sonnet", bucket: sonnet)
+                UsageBucketRow(label: "Sonnet", bucket: sonnet, windowSeconds: 7 * 24 * 3600)
             }
         }
 
@@ -284,6 +286,10 @@ private struct CodeEntryView: View {
 private struct UsageBucketRow: View {
     let label: String
     let bucket: UsageBucket?
+    let windowSeconds: TimeInterval
+
+    @AppStorage(AppearanceDefaultsKey.showResetDivider) private var showResetDivider = false
+    @AppStorage(AppearanceDefaultsKey.coloredResetDivider) private var coloredResetDivider = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -295,8 +301,21 @@ private struct UsageBucketRow: View {
                     .font(.subheadline)
                     .monospacedDigit()
             }
-            ProgressView(value: (bucket?.utilization ?? 0) / 100.0, total: 1.0)
-                .tint(colorForPct((bucket?.utilization ?? 0) / 100.0))
+            ZStack(alignment: .leading) {
+                ProgressView(value: (bucket?.utilization ?? 0) / 100.0, total: 1.0)
+                    .tint(colorForPct((bucket?.utilization ?? 0) / 100.0))
+                if showResetDivider,
+                   bucket?.resetsAtDate != nil,
+                   let pos = bucket?.resetPosition(windowSeconds: windowSeconds, now: Date()),
+                   let usagePct = bucket?.utilization {
+                    let timeLeftFraction = 1.0 - pos
+                    let state = resetIndicatorState(
+                        usagePct: usagePct,
+                        timeLeftFraction: timeLeftFraction
+                    )
+                    ResetIndicatorView(position: pos, state: state, colored: coloredResetDivider)
+                }
+            }
             if let resetDate = bucket?.resetsAtDate {
                 Text("Resets \(resetDate, style: .relative)")
                     .font(.caption2)
@@ -308,6 +327,23 @@ private struct UsageBucketRow: View {
     private var percentageText: String {
         guard let pct = bucket?.utilization else { return "—" }
         return "\(Int(round(pct)))%"
+    }
+}
+
+private struct ResetIndicatorView: View {
+    let position: Double          // 0...1
+    let state: ResetIndicatorState
+    let colored: Bool
+
+    var body: some View {
+        GeometryReader { geo in
+            Rectangle()
+                .fill(state.color(colored: colored))
+                .frame(width: 2)
+                .offset(x: geo.size.width * position - 1)
+                .accessibilityHidden(true)
+        }
+        .frame(height: 8)
     }
 }
 

@@ -13,49 +13,70 @@ private let iconWidth: CGFloat = logoSize + logoGap + barsWidth
 private let iconHeight: CGFloat = 18
 private let fontSize: CGFloat = 8
 
-private struct CachedLabel {
-    let string: NSAttributedString
-    let size: NSSize
+struct MenuBarIconParams {
+    let pct5h: Double
+    let pct7d: Double
+    let resetPos5h: Double?
+    let state5h: ResetIndicatorState
+    let resetPos7d: Double?
+    let state7d: ResetIndicatorState
+    let showResetDivider: Bool
+    let coloredResetDivider: Bool
 }
 
-private let cachedLabels: [String: CachedLabel] = {
+private func drawLabel(_ label: String, x: CGFloat, barY: CGFloat, color: NSColor) {
     let font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .medium)
-    let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
-    var result = [String: CachedLabel]()
-    for label in ["5h", "7d"] {
-        let str = NSAttributedString(string: label, attributes: attrs)
-        result[label] = CachedLabel(string: str, size: str.size())
-    }
-    return result
-}()
-
-private func drawRow(label: String, barX: CGFloat, barY: CGFloat, labelX: CGFloat, drawBarFill: (CGFloat, CGFloat) -> Void) {
-    if let cached = cachedLabels[label] {
-        let labelY = barY + (barHeight - cached.size.height) / 2
-        cached.string.draw(at: NSPoint(x: labelX + labelWidth - cached.size.width, y: labelY))
-    }
-    drawBarFill(barX, barY)
+    let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+    let str = NSAttributedString(string: label, attributes: attrs)
+    let size = str.size()
+    let labelY = barY + (barHeight - size.height) / 2
+    str.draw(at: NSPoint(x: x + labelWidth - size.width, y: labelY))
 }
 
-func renderIcon(pct5h: Double, pct7d: Double) -> NSImage {
+func renderIcon(_ params: MenuBarIconParams) -> NSImage {
+    let wantsColored = params.showResetDivider && params.coloredResetDivider
+    let baseColor: NSColor = wantsColored ? .labelColor : .white
+
     let image = NSImage(size: NSSize(width: iconWidth, height: iconHeight), flipped: true) { _ in
         let offset = logoSize + logoGap
         let barX = offset + labelWidth + labelGap
         let topY = (iconHeight - barHeight * 2 - rowGap) / 2
         let bottomY = topY + barHeight + rowGap
 
-        drawClaudeLogo(x: 0, y: (iconHeight - logoSize) / 2, size: logoSize)
+        drawClaudeLogo(x: .zero, y: (iconHeight - logoSize) / 2, size: logoSize, tint: wantsColored ? baseColor : nil)
 
-        drawRow(label: "5h", barX: barX, barY: topY, labelX: offset) { x, y in
-            drawBar(x: x, y: y, width: barWidth, height: barHeight, cornerRadius: cornerRadius, pct: pct5h)
+        drawLabel("5h", x: offset, barY: topY, color: baseColor)
+        drawBar(x: barX, y: topY, width: barWidth, height: barHeight,
+                cornerRadius: cornerRadius, pct: params.pct5h, color: baseColor)
+        if params.showResetDivider, let pos = params.resetPos5h {
+            drawDivider(barX: barX, barY: topY,
+                        position: pos,
+                        color: params.state5h.nsColor(colored: params.coloredResetDivider).withAlphaComponent(0.6))
         }
-        drawRow(label: "7d", barX: barX, barY: bottomY, labelX: offset) { x, y in
-            drawBar(x: x, y: y, width: barWidth, height: barHeight, cornerRadius: cornerRadius, pct: pct7d)
+
+        drawLabel("7d", x: offset, barY: bottomY, color: baseColor)
+        drawBar(x: barX, y: bottomY, width: barWidth, height: barHeight,
+                cornerRadius: cornerRadius, pct: params.pct7d, color: baseColor)
+        if params.showResetDivider, let pos = params.resetPos7d {
+            drawDivider(barX: barX, barY: bottomY,
+                        position: pos,
+                        color: params.state7d.nsColor(colored: params.coloredResetDivider).withAlphaComponent(0.6))
         }
+
         return true
     }
-    image.isTemplate = true
+    image.isTemplate = !wantsColored
     return image
+}
+
+func renderIcon(pct5h: Double, pct7d: Double) -> NSImage {
+    renderIcon(MenuBarIconParams(
+        pct5h: pct5h, pct7d: pct7d,
+        resetPos5h: nil, state5h: .normal,
+        resetPos7d: nil, state7d: .normal,
+        showResetDivider: false,
+        coloredResetDivider: false
+    ))
 }
 
 func renderUnauthenticatedIcon() -> NSImage {
@@ -65,14 +86,12 @@ func renderUnauthenticatedIcon() -> NSImage {
         let topY = (iconHeight - barHeight * 2 - rowGap) / 2
         let bottomY = topY + barHeight + rowGap
 
-        drawClaudeLogo(x: 0, y: (iconHeight - logoSize) / 2, size: logoSize)
+        drawClaudeLogo(x: 0, y: (iconHeight - logoSize) / 2, size: logoSize, tint: nil)
 
-        drawRow(label: "5h", barX: barX, barY: topY, labelX: offset) { x, y in
-            drawDashedBar(x: x, y: y, width: barWidth, height: barHeight, cornerRadius: cornerRadius)
-        }
-        drawRow(label: "7d", barX: barX, barY: bottomY, labelX: offset) { x, y in
-            drawDashedBar(x: x, y: y, width: barWidth, height: barHeight, cornerRadius: cornerRadius)
-        }
+        drawLabel("5h", x: offset, barY: topY, color: .black)
+        drawDashedBar(x: barX, y: topY, width: barWidth, height: barHeight, cornerRadius: cornerRadius)
+        drawLabel("7d", x: offset, barY: bottomY, color: .black)
+        drawDashedBar(x: barX, y: bottomY, width: barWidth, height: barHeight, cornerRadius: cornerRadius)
         return true
     }
     image.isTemplate = true
@@ -81,10 +100,10 @@ func renderUnauthenticatedIcon() -> NSImage {
 
 // MARK: - Bar drawing
 
-private func drawBar(x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat, cornerRadius: CGFloat, pct: Double) {
+private func drawBar(x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat, cornerRadius: CGFloat, pct: Double, color: NSColor) {
     let bgRect = NSRect(x: x, y: y, width: width, height: height)
     let bgPath = NSBezierPath(roundedRect: bgRect, xRadius: cornerRadius, yRadius: cornerRadius)
-    NSColor.black.withAlphaComponent(0.25).setFill()
+    color.withAlphaComponent(0.25).setFill()
     bgPath.fill()
 
     let clampedPct = max(0, min(1, pct))
@@ -92,7 +111,7 @@ private func drawBar(x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat, co
         let fillWidth = width * clampedPct
         let fillRect = NSRect(x: x, y: y, width: fillWidth, height: height)
         let fillPath = NSBezierPath(roundedRect: fillRect, xRadius: cornerRadius, yRadius: cornerRadius)
-        NSColor.black.setFill()
+        color.setFill()
         fillPath.fill()
     }
 }
@@ -107,6 +126,15 @@ private func drawDashedBar(x: CGFloat, y: CGFloat, width: CGFloat, height: CGFlo
     path.stroke()
 }
 
+private func drawDivider(barX: CGFloat, barY: CGFloat, position: Double, color: NSColor) {
+    let clamped = max(0.0, min(1.0, position))
+    let lineWidth: CGFloat = 1
+    let x = barX + (barWidth * CGFloat(clamped)) - (lineWidth / 2)
+    let rect = NSRect(x: x, y: barY - 1, width: lineWidth, height: barHeight + 2)
+    color.setFill()
+    rect.fill()
+}
+
 // MARK: - Claude logo (pre-rendered 512px template PNG)
 
 private let claudeLogoImage: NSImage? = {
@@ -117,7 +145,16 @@ private let claudeLogoImage: NSImage? = {
     return nil
 }()
 
-private func drawClaudeLogo(x: CGFloat, y: CGFloat, size: CGFloat) {
+private func drawClaudeLogo(x: CGFloat, y: CGFloat, size: CGFloat, tint: NSColor?) {
     guard let logo = claudeLogoImage else { return }
-    logo.draw(in: NSRect(x: x, y: y, width: size, height: size))
+    let rect = NSRect(x: x, y: y, width: size, height: size)
+    guard let tint else {
+        logo.draw(in: rect)
+        return
+    }
+    NSGraphicsContext.saveGraphicsState()
+    logo.draw(in: rect)
+    tint.set()
+    rect.fill(using: .sourceIn)
+    NSGraphicsContext.restoreGraphicsState()
 }

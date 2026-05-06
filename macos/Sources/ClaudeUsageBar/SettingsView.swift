@@ -5,6 +5,9 @@ struct SettingsWindowContent: View {
     @ObservedObject var service: UsageService
     @ObservedObject var notificationService: NotificationService
 
+    @AppStorage(AppearanceDefaultsKey.showResetDivider) private var showResetDivider = false
+    @AppStorage(AppearanceDefaultsKey.coloredResetDivider) private var coloredResetDivider = true
+
     var body: some View {
         Form {
             Section("General") {
@@ -37,6 +40,17 @@ struct SettingsWindowContent: View {
                     value: notificationService.thresholdExtra,
                     onChange: { notificationService.setThresholdExtra($0) }
                 )
+            }
+
+            Section("Appearance") {
+                Toggle("Show reset time divider", isOn: $showResetDivider)
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Colored status", isOn: $coloredResetDivider)
+                        .disabled(!showResetDivider)
+                    Text("Off uses a single neutral color.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             if service.isAuthenticated {

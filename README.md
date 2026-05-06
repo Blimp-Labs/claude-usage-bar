@@ -30,6 +30,11 @@ A tiny macOS menu bar app that shows your Claude API usage at a glance. Click it
 - Just sign in — OAuth via browser, no API keys to manage
 - Minimal dependencies — SwiftUI, Swift Charts, Foundation, and Sparkle for updates
 
+## Unreleased
+
+- **Reset-time divider** — vertical indicator on progress bars showing when the next reset occurs; color reflects usage intensity (normal / warning / critical / in-usage-limit)
+- **Appearance settings** — toggle to show/hide the reset divider and enable colored status indicators
+
 ## Install
 
 ### Download
