@@ -9,6 +9,7 @@ class UsageService: ObservableObject {
     @Published var lastUpdated: Date?
     @Published var isAuthenticated = false
     @Published var isAwaitingCode = false
+    @Published private(set) var isFetching = false
     @Published private(set) var accountEmail: String?
 
     var historyService: UsageHistoryService?
@@ -262,6 +263,12 @@ class UsageService: ObservableObject {
             isAuthenticated = false
             return
         }
+
+        // Re-entrancy guard: ignore overlapping fetches so rapid manual
+        // refreshes can't fire concurrent requests and trip rate limiting.
+        guard !isFetching else { return }
+        isFetching = true
+        defer { isFetching = false }
 
         do {
             guard let result = try await sendAuthorizedRequest(to: usageEndpoint) else {
