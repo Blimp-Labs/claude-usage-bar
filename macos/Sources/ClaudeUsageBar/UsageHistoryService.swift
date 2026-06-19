@@ -1,17 +1,13 @@
 import Foundation
-import Combine
 import AppKit
 
 @MainActor
 class UsageHistoryService: ObservableObject {
     @Published var history = UsageHistory()
 
-    private var flushTimer: AnyCancellable?
-    private var isDirty = false
     private var terminationObserver: Any?
 
     private static let retentionInterval: TimeInterval = 30 * 86400 // 30 days
-    private static let flushInterval: TimeInterval = 300 // 5 minutes
 
     private static var historyFileURL: URL {
         let dir = FileManager.default.homeDirectoryForCurrentUser
@@ -63,31 +59,16 @@ class UsageHistoryService: ObservableObject {
     func recordDataPoint(pct5h: Double, pct7d: Double) {
         let point = UsageDataPoint(pct5h: pct5h, pct7d: pct7d)
         history.dataPoints.append(point)
-        isDirty = true
-        startFlushTimerIfNeeded()
+        flushToDisk()
     }
 
     // MARK: - Flush
 
     func flushToDisk() {
-        guard isDirty else { return }
         history.dataPoints = pruned(history.dataPoints)
 
         guard let data = try? JSONEncoder.historyEncoder.encode(history) else { return }
         try? data.write(to: Self.historyFileURL, options: .atomic)
-
-        isDirty = false
-        flushTimer?.cancel()
-        flushTimer = nil
-    }
-
-    private func startFlushTimerIfNeeded() {
-        guard flushTimer == nil else { return }
-        flushTimer = Timer.publish(every: Self.flushInterval, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in
-                self?.flushToDisk()
-            }
     }
 
     // MARK: - Downsampling
