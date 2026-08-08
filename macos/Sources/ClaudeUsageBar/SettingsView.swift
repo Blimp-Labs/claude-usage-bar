@@ -87,6 +87,12 @@ struct SettingsWindowContent: View {
                     }
                 }
             }
+
+            Section {
+                Text(appVersionString)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .frame(minWidth: 400, maxWidth: 400, maxHeight: 600)
@@ -94,6 +100,12 @@ struct SettingsWindowContent: View {
         .onAppear {
             focusSettingsWindow()
         }
+    }
+
+    private var appVersionString: String {
+        let shortVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        return "Version \(shortVersion) (\(build))"
     }
 }
 

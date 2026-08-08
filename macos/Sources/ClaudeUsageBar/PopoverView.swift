@@ -1,6 +1,8 @@
 import SwiftUI
+import os
 
 struct PopoverView: View {
+    private static let resizeLogger = Logger(subsystem: "com.local.ClaudeUsageBar", category: "PopoverResize")
     @ObservedObject var service: UsageService
     @ObservedObject var historyService: UsageHistoryService
     @ObservedObject var notificationService: NotificationService
@@ -39,13 +41,20 @@ struct PopoverView: View {
         }
         .padding()
         .frame(width: 340)
-        .background(GeometryReader { geo in
-            Color.clear.preference(key: PopoverContentSizeKey.self, value: geo.size)
-        })
-        .background(PopoverWindowLocator { w in
-            hostingWindow = w
-        })
+        .background(
+            GeometryReader { geo in
+                Color.clear.preference(key: PopoverContentSizeKey.self, value: geo.size)
+            }
+        )
+        .background(
+            PopoverWindowLocator { w in
+                hostingWindow = w
+            }
+        )
         .onPreferenceChange(PopoverContentSizeKey.self) { size in
+            Self.resizeLogger.debug(
+                "onPreferenceChange: measuredSize \(String(describing: measuredSize), privacy: .public) -> \(String(describing: size), privacy: .public), hostingWindow=\(hostingWindow != nil, privacy: .public)"
+            )
             guard size != .zero else { return }
             measuredSize = size
             if let hostingWindow {
@@ -53,6 +62,9 @@ struct PopoverView: View {
             }
         }
         .onChange(of: hostingWindow) { _, window in
+            Self.resizeLogger.debug(
+                "onChange(hostingWindow): window=\(window != nil, privacy: .public), measuredSize=\(String(describing: measuredSize), privacy: .public)"
+            )
             guard let window, measuredSize != .zero else { return }
             applySize(measuredSize, to: window)
         }
@@ -111,7 +123,8 @@ struct PopoverView: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(
+            Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
         Button("Sign in again") {
             service.startOAuthFlow()
@@ -137,7 +150,8 @@ struct PopoverView: View {
         )
 
         if let opus = service.usage?.sevenDayOpus,
-           opus.utilization != nil {
+            opus.utilization != nil
+        {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Per-Model (7 day)")
                     .font(.subheadline)
@@ -157,7 +171,7 @@ struct PopoverView: View {
         UsageChartView(historyService: historyService)
 
         if showRunOutProjection {
-            RunOutProjectionView(service: service)
+            RunOutProjectionView(service: service, onOutcomeCaseChange: forceResize)
         }
 
         if let error = service.lastError {
@@ -223,14 +237,89 @@ struct PopoverView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
-    /// `setContentSize` alone lets AppKit defer laying out newly-inserted subviews (e.g. a
-    /// material card that just appeared, like the run-out projection panel) to the next
-    /// runloop turn — so it briefly renders at its pre-insertion frame while sibling cards
-    /// already show the new size. Forcing a synchronous layout pass right after resizing
-    /// keeps every card's backing view in sync with the window in the same frame.
+    /// `setContentSize` keeps the window's bottom-left corner fixed and grows/shrinks upward,
+    /// which is correct for an ordinary document window but wrong for a menu-bar-anchored
+    /// popover: the top edge needs to stay pinned under the status item, with the window
+    /// growing/shrinking downward instead. Left uncorrected, a height change (e.g. the
+    /// run-out projection card appearing or collapsing) drags the top edge away from its
+    /// anchor while the content still renders as if it were pinned there.
     private func applySize(_ size: CGSize, to window: NSWindow) {
-        window.setContentSize(size)
+        let frameBefore = window.frame
+        let contentRect = window.contentRect(forFrameRect: window.frame)
+        var newContentRect = contentRect
+        newContentRect.size = size
+        newContentRect.origin.y = contentRect.maxY - size.height
+        let requestedFrame = window.frameRect(forContentRect: newContentRect)
+        window.setFrame(requestedFrame, display: true)
         window.contentView?.layoutSubtreeIfNeeded()
+        let frameAfter = window.frame
+        let contentViewFrame = window.contentView?.frame
+        let hostingSubviewFrames = window.contentView?.subviews.map { $0.frame } ?? []
+        Self.resizeLogger.debug(
+            """
+            applySize(\(String(describing: size), privacy: .public)): \
+            before=\(String(describing: frameBefore), privacy: .public) \
+            requested=\(String(describing: requestedFrame), privacy: .public) \
+            after=\(String(describing: frameAfter), privacy: .public) \
+            contentView=\(String(describing: contentViewFrame), privacy: .public) \
+            subviews=\(String(describing: hostingSubviewFrames), privacy: .public)
+            """
+        )
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            Self.resizeLogger.debug(
+                "applySize(\(String(describing: size), privacy: .public)) +0.3s: frame=\(String(describing: window.frame), privacy: .public)"
+            )
+        }
+    }
+
+    /// `RunOutProjectionView`'s outcome-driven height change doesn't reach `PopoverContentSizeKey`
+    /// (its `TimelineView` doesn't renegotiate its own size with its ancestors when its content's
+    /// shape changes — confirmed by a device capture showing zero resize activity across an
+    /// observed transition). Sidestep the preference pipeline for this signal and ask AppKit
+    /// directly for the hosting view's current ideal size instead.
+    private func forceResize() {
+        guard let hostingWindow else { return }
+        // The SwiftUI state change that triggered this callback needs a run loop turn to reach
+        // the underlying NSView tree before fittingSize/intrinsicContentSize reflect it.
+        DispatchQueue.main.async {
+            guard let contentView = hostingWindow.contentView else { return }
+            contentView.layoutSubtreeIfNeeded()
+
+            Self.resizeLogger.debug(
+                "forceResize: contentView=\(String(describing: type(of: contentView)), privacy: .public) frame=\(String(describing: contentView.frame), privacy: .public) fittingSize=\(String(describing: contentView.fittingSize), privacy: .public) intrinsic=\(String(describing: contentView.intrinsicContentSize), privacy: .public)"
+            )
+            for (i, sub) in contentView.subviews.enumerated() {
+                Self.resizeLogger.debug(
+                    "forceResize: subview[\(i, privacy: .public)]=\(String(describing: type(of: sub)), privacy: .public) frame=\(String(describing: sub.frame), privacy: .public) fittingSize=\(String(describing: sub.fittingSize), privacy: .public) intrinsic=\(String(describing: sub.intrinsicContentSize), privacy: .public)"
+                )
+                for (j, subsub) in sub.subviews.enumerated() {
+                    Self.resizeLogger.debug(
+                        "forceResize: subview[\(i, privacy: .public)][\(j, privacy: .public)]=\(String(describing: type(of: subsub)), privacy: .public) frame=\(String(describing: subsub.frame), privacy: .public) fittingSize=\(String(describing: subsub.fittingSize), privacy: .public) intrinsic=\(String(describing: subsub.intrinsicContentSize), privacy: .public)"
+                    )
+                }
+            }
+
+            // Try, in order: the content view's own intrinsic size, its fitting size, then the
+            // same two on its first subview — whichever first reports something real wins.
+            let noIntrinsic = NSView.noIntrinsicMetric
+            let candidates = [
+                contentView.intrinsicContentSize,
+                contentView.fittingSize,
+                contentView.subviews.first?.intrinsicContentSize,
+                contentView.subviews.first?.fittingSize,
+            ].compactMap { $0 }
+            guard
+                let resolved = candidates.first(where: {
+                    $0 != .zero && $0.width != noIntrinsic && $0.height != noIntrinsic
+                })
+            else {
+                Self.resizeLogger.debug("forceResize: no usable size candidate, giving up")
+                return
+            }
+            Self.resizeLogger.debug("forceResize: resolved=\(String(describing: resolved), privacy: .public)")
+            measuredSize = resolved
+            applySize(resolved, to: hostingWindow)
+        }
     }
 
     private func refresh() {
@@ -302,10 +391,13 @@ private struct SetupView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
-            Picker("", selection: Binding(
-                get: { service.pollingMinutes },
-                set: { service.updatePollingInterval($0) }
-            )) {
+            Picker(
+                "",
+                selection: Binding(
+                    get: { service.pollingMinutes },
+                    set: { service.updatePollingInterval($0) }
+                )
+            ) {
                 ForEach(UsageService.pollingOptions, id: \.self) { mins in
                     Text(localizedPollingInterval(for: mins, locale: .autoupdatingCurrent))
                         .tag(mins)
@@ -396,7 +488,8 @@ private struct CodeEntryView: View {
             // Clear clipboard if it still contains the OAuth code so a one-time
             // secret doesn't linger in the pasteboard after successful authentication.
             if service.isAuthenticated,
-               NSPasteboard.general.string(forType: .string) == value {
+                NSPasteboard.general.string(forType: .string) == value
+            {
                 NSPasteboard.general.clearContents()
             }
         }
@@ -441,9 +534,10 @@ private struct UsageBucketRow: View {
 
     private var resetDividerInfo: (position: Double, state: ResetIndicatorState, colored: Bool)? {
         guard showResetDivider,
-              let ws = windowSeconds,
-              let pos = bucket?.resetPosition(windowSeconds: ws, now: Date()),
-              let usagePct = bucket?.utilization else { return nil }
+            let ws = windowSeconds,
+            let pos = bucket?.resetPosition(windowSeconds: ws, now: Date()),
+            let usagePct = bucket?.utilization
+        else { return nil }
         // forecastPct is already gated on the "Show forecast" setting by the caller
         // and stored as a 0...1 fraction; resetIndicatorState wants 0...100.
         let state = resetIndicatorState(
@@ -479,11 +573,13 @@ private struct UsageProgressBar: View {
 
                 if clamped > 0 {
                     Capsule()
-                        .fill(LinearGradient(
-                            colors: [fillColor.opacity(0.75), fillColor],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        ))
+                        .fill(
+                            LinearGradient(
+                                colors: [fillColor.opacity(0.75), fillColor],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
                         .frame(width: geo.size.width * clamped, height: barHeight)
                 }
 
@@ -581,7 +677,9 @@ public enum ServiceStatusDisplayState: Equatable {
     case unavailable
     case ready(StatusSnapshot)
 
-    public static func make(snapshot: StatusSnapshot?, lastError: StatusError?) -> ServiceStatusDisplayState {
+    public static func make(snapshot: StatusSnapshot?, lastError: StatusError?)
+        -> ServiceStatusDisplayState
+    {
         if let snapshot {
             return .ready(snapshot)
         }

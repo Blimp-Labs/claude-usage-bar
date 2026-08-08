@@ -1,5 +1,6 @@
 import SwiftUI
 import Charts
+import os
 
 /// A forward-looking "when will the 5-hour window run out?" illustration: a one-line status
 /// plus a chart spanning now → the next 5h reset, with a red rule at the projected run-out.
@@ -7,7 +8,16 @@ import Charts
 /// Deliberately separate from `UsageChartView` (the history chart) — this reads live state off
 /// `UsageService` (`pct5h`, `forecast`, `reset5h`) rather than raw persisted history.
 struct RunOutProjectionView: View {
+    private static let logger = Logger(subsystem: "com.local.ClaudeUsageBar", category: "RunOutProjection")
+
     @ObservedObject var service: UsageService
+    /// Called on the main actor whenever `RunOutEstimate.Outcome`'s case (chart shown or not)
+    /// changes. `GeometryReader`/`.preference()`-based size tracking in the ancestor
+    /// `PopoverView` doesn't reliably observe height changes that originate inside this view's
+    /// `TimelineView` — confirmed by a real capture showing zero resize-pipeline activity
+    /// across an observed outcome transition — so the parent needs an explicit signal instead
+    /// of relying on that propagation.
+    var onOutcomeCaseChange: (() -> Void)?
 
     var body: some View {
         // Re-evaluate every minute so "now" and the red line stay live while the popover is
@@ -26,6 +36,10 @@ struct RunOutProjectionView: View {
             reset: service.reset5h,
             now: now
         )
+        let showsChart = estimate.reset != nil && estimate.outcome != .insufficientData
+        let _ = Self.logger.debug(
+            "content(now:): outcome=\(String(describing: estimate.outcome), privacy: .public) showsChart=\(showsChart, privacy: .public)"
+        )
 
         VStack(alignment: .leading, spacing: 8) {
             statusText(for: estimate.outcome)
@@ -36,6 +50,10 @@ struct RunOutProjectionView: View {
         }
         .padding(10)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .onChange(of: showsChart) { _, _ in
+            Self.logger.debug("showsChart changed -> \(showsChart, privacy: .public), notifying parent")
+            onOutcomeCaseChange?()
+        }
     }
 
     // MARK: - Status line
