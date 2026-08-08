@@ -6,7 +6,7 @@
 
 Have you ever found yourself refreshing the Claude usage page, wondering how close you are to hitting your rate limit? Yeah, I've been there too. So I built this.
 
-Now it's just a glimpse away — always sitting at the top of your screen.
+Now it's just a glimpse away — always sitting at the top of your desktop screen.
 
 <p align="center">
   <img src="macos/Resources/demo.png" width="400" alt="Claude Usage Bar demo">
@@ -22,9 +22,12 @@ A tiny macOS menu bar app that shows your Claude API usage at a glance. Click it
 
 - Menu bar icon with a mini dual-bar showing 5-hour and 7-day utilization
 - Detailed popover with per-window usage, per-model breakdown, and reset timers
+- Reset-time divider on usage bars — see at a glance when your quota resets, with color cues that escalate as you approach the limit. Toggle and color scheme in Settings → Appearance
 - Extra usage tracking with USD currency display
 - Usage history chart — see how your usage evolves over time (1h / 6h / 1d / 7d / 30d)
 - Hover over the chart to see exact values at any point
+- Usage forecast — a band projecting where you're heading before the reset window closes
+- Service status — Claude API, claude.ai, and Claude Code health in the popover; menu bar icon tints on incidents. Toggle and poll interval in Settings → Service Status
 - Configurable polling interval (5m / 15m / 30m / 1h)
 - Built-in update checks via Sparkle
 - Just sign in — OAuth via browser, no API keys to manage
@@ -60,21 +63,25 @@ make install        # copy to /Applications
 5. Release builds show **Check for Updates…** in the popover so you can pull newer versions without re-downloading manually
 
 Click the icon anytime to see:
-- 5-hour and 7-day usage with progress bars and reset timers
+- 5-hour and 7-day usage with progress bars, reset timers, and a divider marking when your quota resets
 - Per-model breakdown (Opus / Sonnet) when available
 - Extra usage credits and limits
 - Usage history chart with adjustable time range and hover details
+- Usage forecast band projecting your utilization before the reset window closes
+- Claude service status (API, claude.ai, Claude Code) with incident messages and a link to status.claude.com
 
 ## Data storage
 
-All data is stored locally in `~/.config/claude-usage-bar/`:
+Credentials are stored in the macOS Keychain; usage history is stored on disk:
 
-| File | Purpose |
-|------|---------|
-| `token` | OAuth access token (permissions: `0600`) |
-| `history.json` | Usage history for the chart (30-day retention) |
+| Location | Purpose |
+|----------|---------|
+| macOS Keychain (`claude-usage-bar` / `credentials`) | OAuth credentials — access token, refresh token, expiry |
+| `~/Library/Application Support/claude-usage-bar/history.json` | Usage history for the chart (30-day retention) |
 
 History is buffered in memory and flushed to disk every 5 minutes and on app quit. No data is sent anywhere other than the Anthropic API.
+
+Existing history at the legacy path (`~/.config/claude-usage-bar/history.json`) is automatically moved to the Application Support location on first launch after updating.
 
 ## Development
 
@@ -137,16 +144,25 @@ macos/                           # macOS menu bar app (Swift/SwiftUI)
 ├── Sources/ClaudeUsageBar/
 │   ├── ClaudeUsageBarApp.swift      # App entry point, menu bar setup
 │   ├── UsageService.swift           # OAuth, polling, API calls
+│   ├── StoredCredentials.swift      # OAuth credential model + Keychain-backed store
 │   ├── UsageModel.swift             # API response types
 │   ├── UsageHistoryModel.swift      # History data types, time ranges
 │   ├── UsageHistoryService.swift    # Persistence, downsampling
+│   ├── UsageForecastService.swift   # Near-future utilization forecast for the chart
 │   ├── UsageChartView.swift         # Swift Charts trajectory view
 │   ├── PopoverView.swift            # Main popover UI
 │   ├── SettingsView.swift           # Settings window
+│   ├── AppearanceSettings.swift     # Divider and color scheme preference keys
 │   ├── NotificationService.swift    # Usage threshold notifications
-│   ├── MenuBarIconRenderer.swift    # Menu bar icon drawing
+│   ├── MenuBarIconRenderer.swift    # Menu bar icon drawing + status logo tint
+│   ├── ResetIndicatorState.swift    # Discrete state for reset-time divider coloring
+│   ├── StatusPageClient.swift       # Statuspage.io v2 API client
+│   ├── StatusPageModels.swift       # Decodable models for status API responses
+│   ├── ClaudeServiceStatus.swift    # Severity enum + rollup + component filter
+│   ├── StatusMonitor.swift          # Polling, backoff, sleep/wake lifecycle
 │   ├── PollingOptionFormatter.swift # Polling interval display labels
 │   ├── AppUpdater.swift             # Sparkle update integration
+│   ├── AppResources.swift           # App bundle resource lookup
 │   └── Resources/
 │       ├── claude-logo.png          # Pre-rendered menu bar logo (512px)
 │       └── en.lproj/Localizable.strings
@@ -154,7 +170,7 @@ macos/                           # macOS menu bar app (Swift/SwiftUI)
 ├── Resources/                       # App bundle resources (not SwiftPM)
 │   ├── Info.plist
 │   ├── Assets.xcassets/             # App icon
-│   └── claude-logo.svg             # Source SVG for menu bar logo
+│   └── claude-logo.svg              # Source SVG for menu bar logo
 ├── scripts/
 │   ├── build.sh                     # Build + bundle + codesign
 │   └── generate-logo-png.swift      # Regenerate logo PNG from SVG

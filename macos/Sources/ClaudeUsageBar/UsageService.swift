@@ -2,17 +2,25 @@ import Foundation
 import Combine
 import CryptoKit
 import AppKit
+import os.log
+
+private let securityLog = OSLog(subsystem: "com.local.ClaudeUsageBar", category: "security")
 @MainActor
 class UsageService: ObservableObject {
     @Published var usage: UsageResponse?
+    @Published var forecast: UsageForecast?
     @Published var lastError: String?
     @Published var lastUpdated: Date?
     @Published var isAuthenticated = false
     @Published var isAwaitingCode = false
+    @Published var sessionExpired = false
+    @Published private(set) var isFetching = false
     @Published private(set) var accountEmail: String?
 
     var historyService: UsageHistoryService?
     var notificationService: NotificationService?
+
+    private let forecastService = UsageForecastService()
 
     private var timer: Timer?
     private let session: URLSession
@@ -21,6 +29,7 @@ class UsageService: ObservableObject {
     private let tokenEndpoint: URL
     private let credentialsStore: StoredCredentialsStore
     private let localProfileLoader: @MainActor () -> String?
+    private let urlOpener: @MainActor (URL) -> Bool
     private var currentInterval: TimeInterval
     private enum RefreshResult {
         case success
@@ -29,6 +38,12 @@ class UsageService: ObservableObject {
     }
 
     private var refreshTask: Task<RefreshResult, Never>?
+
+    // let properties are safe to read from nonisolated deinit (immutable, no data races).
+    private let notificationCenter: NotificationCenter
+    private let wakeNotification: Notification.Name
+    // nonisolated(unsafe): var mutated on MainActor; deinit reads without a hop.
+    nonisolated(unsafe) private var wakeObserver: (any NSObjectProtocol)?
 
     static let defaultPollingMinutes = 30
     static let pollingOptions = [5, 15, 30, 60]
@@ -69,6 +84,10 @@ class UsageService: ObservableObject {
     private var codeVerifier: String?
     private var oauthState: String?
 
+    // Rate-limit code entry: lock out after this many consecutive failures.
+    static let maxCodeAttempts = 5
+    @Published private(set) var codeAttempts = 0
+
     var pct5h: Double { (usage?.fiveHour?.utilization ?? 0) / 100.0 }
     var pct7d: Double { (usage?.sevenDay?.utilization ?? 0) / 100.0 }
     var pctExtra: Double { (usage?.extraUsage?.utilization ?? 0) / 100.0 }
@@ -82,7 +101,10 @@ class UsageService: ObservableObject {
         tokenEndpoint: URL = UsageService.defaultTokenEndpoint,
         redirectUri: String = UsageService.defaultRedirectURI,
         credentialsStore: StoredCredentialsStore = StoredCredentialsStore(),
-        localProfileLoader: @MainActor @escaping () -> String? = UsageService.loadLocalProfile
+        localProfileLoader: @MainActor @escaping () -> String? = UsageService.loadLocalProfile,
+        urlOpener: @MainActor @escaping (URL) -> Bool = { NSWorkspace.shared.open($0) },
+        notificationCenter: NotificationCenter? = nil,
+        wakeNotification: Notification.Name? = nil
     ) {
         self.session = session
         self.usageEndpoint = usageEndpoint
@@ -91,6 +113,9 @@ class UsageService: ObservableObject {
         self.redirectUri = redirectUri
         self.credentialsStore = credentialsStore
         self.localProfileLoader = localProfileLoader
+        self.urlOpener = urlOpener
+        self.notificationCenter = notificationCenter ?? NSWorkspace.shared.notificationCenter
+        self.wakeNotification = wakeNotification ?? NSWorkspace.didWakeNotification
         let stored = UserDefaults.standard.integer(forKey: "pollingMinutes")
         let minutes = Self.pollingOptions.contains(stored) ? stored : Self.defaultPollingMinutes
         self.pollingMinutes = minutes
@@ -98,15 +123,35 @@ class UsageService: ObservableObject {
         isAuthenticated = loadCredentials() != nil
     }
 
+    deinit {
+        if let wakeObserver { notificationCenter.removeObserver(wakeObserver) }
+    }
+
     // MARK: - Polling
 
     func startPolling() {
         guard isAuthenticated else { return }
+        installWakeObserver()
         Task {
             await fetchUsage()
             if accountEmail == nil { await fetchProfile() }
         }
         scheduleTimer()
+    }
+
+    private func installWakeObserver() {
+        if let wakeObserver { notificationCenter.removeObserver(wakeObserver) }
+        wakeObserver = notificationCenter.addObserver(
+            forName: wakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.isAuthenticated else { return }
+                self.scheduleTimer()
+                Task { await self.fetchUsage() }
+            }
+        }
     }
 
     private func scheduleTimer() {
@@ -124,6 +169,8 @@ class UsageService: ObservableObject {
     // MARK: - OAuth PKCE Flow
 
     func startOAuthFlow() {
+        sessionExpired = false
+        codeAttempts = 0
         let verifier = generateCodeVerifier()
         let challenge = generateCodeChallenge(from: verifier)
         let state = generateCodeVerifier() // random state
@@ -144,24 +191,60 @@ class UsageService: ObservableObject {
         ]
 
         if let url = components.url {
-            NSWorkspace.shared.open(url)
+            guard urlOpener(url) else {
+                codeVerifier = nil
+                oauthState = nil
+                isAwaitingCode = false
+                lastError = "Could not open Claude sign-in page"
+                return
+            }
             isAwaitingCode = true
         }
     }
 
     func submitOAuthCode(_ rawCode: String) async {
+        // Enforce a hard limit on consecutive failed attempts to prevent brute-force
+        // of short-lived OAuth codes. The user must restart the sign-in flow after
+        // maxCodeAttempts failures.
+        guard codeAttempts < Self.maxCodeAttempts else {
+            lastError = "Too many failed attempts — please sign in again"
+            isAwaitingCode = false
+            codeVerifier = nil
+            oauthState = nil
+            codeAttempts = 0
+            return
+        }
+
         // Response format: "code#state" — parse it
         let parts = rawCode.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "#", maxSplits: 1)
         // A whitespace-only paste trims to "" and yields no parts, so guard before
         // indexing. Leave isAwaitingCode set so the user can retry without restarting.
         guard let code = parts.first.map(String.init), !code.isEmpty else {
+            codeAttempts += 1
             lastError = "No OAuth code entered"
             return
         }
 
-        if parts.count > 1 {
+        // State validation is mandatory when an OAuth flow is pending.
+        // Mismatches are logged as security events (visible in Console.app under
+        // the "security" category) to support incident investigation.
+        if oauthState != nil {
+            guard parts.count > 1 else {
+                os_log(.error, log: securityLog,
+                       "OAuth code submitted without state parameter — possible CSRF attempt")
+                codeAttempts += 1
+                lastError = "Missing OAuth state — expected code#state format"
+                isAwaitingCode = false
+                codeVerifier = nil
+                oauthState = nil
+                return
+            }
             let returnedState = String(parts[1])
             guard returnedState == oauthState else {
+                os_log(.fault, log: securityLog,
+                       "OAuth state mismatch — expected %{private}@ got %{private}@; discarding flow",
+                       oauthState ?? "", returnedState)
+                codeAttempts += 1
                 lastError = "OAuth state mismatch — try again"
                 isAwaitingCode = false
                 codeVerifier = nil
@@ -198,6 +281,7 @@ class UsageService: ObservableObject {
                 return
             }
             guard http.statusCode == 200 else {
+                codeAttempts += 1
                 let bodyStr = String(data: data, encoding: .utf8) ?? ""
                 lastError = "Token exchange failed: HTTP \(http.statusCode) \(bodyStr)"
                 return
@@ -205,6 +289,7 @@ class UsageService: ObservableObject {
 
             guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let credentials = credentials(from: json) else {
+                codeAttempts += 1
                 lastError = "Could not parse token response"
                 return
             }
@@ -215,6 +300,7 @@ class UsageService: ObservableObject {
                 lastError = "Failed to save credentials: \(error.localizedDescription)"
                 return
             }
+            codeAttempts = 0
             isAuthenticated = true
             isAwaitingCode = false
             lastError = nil
@@ -231,6 +317,7 @@ class UsageService: ObservableObject {
     func signOut() {
         deleteCredentials()
         isAuthenticated = false
+        sessionExpired = false
         usage = nil
         lastUpdated = nil
         accountEmail = nil
@@ -239,6 +326,10 @@ class UsageService: ObservableObject {
         refreshTask?.cancel()
         refreshTask = nil
         lastError = nil
+        if let wakeObserver {
+            notificationCenter.removeObserver(wakeObserver)
+            self.wakeObserver = nil
+        }
     }
 
     // MARK: - PKCE Helpers
@@ -262,6 +353,12 @@ class UsageService: ObservableObject {
             isAuthenticated = false
             return
         }
+
+        // Re-entrancy guard: ignore overlapping fetches so rapid manual
+        // refreshes can't fire concurrent requests and trip rate limiting.
+        guard !isFetching else { return }
+        isFetching = true
+        defer { isFetching = false }
 
         do {
             guard let result = try await sendAuthorizedRequest(to: usageEndpoint) else {
@@ -289,6 +386,9 @@ class UsageService: ObservableObject {
             lastError = nil
             lastUpdated = Date()
             historyService?.recordDataPoint(pct5h: pct5h, pct7d: pct7d)
+            if let history = historyService?.history {
+                forecast = forecastService.forecast(history: history, current: reconciled)
+            }
             notificationService?.checkAndNotify(pct5h: pct5h, pct7d: pct7d, pctExtra: pctExtra)
             if currentInterval != baseInterval {
                 currentInterval = baseInterval
@@ -575,14 +675,15 @@ class UsageService: ObservableObject {
     private func expireSession() {
         deleteCredentials()
         isAuthenticated = false
+        sessionExpired = true
         usage = nil
         lastUpdated = nil
+        lastError = nil
         accountEmail = nil
         timer?.invalidate()
         timer = nil
         refreshTask?.cancel()
         refreshTask = nil
-        lastError = "Session expired — please sign in again"
     }
 }
 

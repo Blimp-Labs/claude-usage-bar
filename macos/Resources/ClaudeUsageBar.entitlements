@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- App Sandbox restricts the attack surface to the declared entitlements below. -->
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+
+    <!-- Outbound HTTPS required for api.anthropic.com and status.claude.com. -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+
+    <!--
+        Keychain access group for OAuth credential storage.
+        The $(AppIdentifierPrefix) token is expanded at signing time to the
+        Developer ID team prefix. For ad-hoc / local builds the prefix is
+        omitted and the app uses its default sandbox group automatically.
+    -->
+    <key>com.apple.security.keychain-access-groups</key>
+    <array>
+        <string>$(AppIdentifierPrefix)com.local.ClaudeUsageBar</string>
+    </array>
+</dict>
+</plist>

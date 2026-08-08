@@ -1,0 +1,10 @@
+{
+  "page": {"id": "tymt9n04zgry", "name": "Claude", "url": "https://status.claude.com", "time_zone": "Etc/UTC"},
+  "components": [
+    {"id": "rwppv331jlwc", "name": "claude.ai", "status": "fluctuating_quantum_state", "position": 1, "group": false},
+    {"id": "yyzkbfz2thpt", "name": "Claude Code", "status": "operational", "position": 4, "group": false}
+  ],
+  "incidents": [],
+  "scheduled_maintenances": [],
+  "status": {"indicator": "none", "description": "All Systems Operational"}
+}

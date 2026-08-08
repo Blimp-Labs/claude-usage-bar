@@ -22,14 +22,23 @@ This builds the release binary via Swift Package Manager, bundles it as a `.app`
 
 ```
 Sources/ClaudeUsageBar/
-├── ClaudeUsageBarApp.swift      # App entry point, menu bar setup
-├── UsageService.swift           # OAuth, polling, API calls
-├── UsageModel.swift             # API response types
-├── UsageHistoryModel.swift      # History data types, time ranges
-├── UsageHistoryService.swift    # Persistence, downsampling
-├── UsageChartView.swift         # Swift Charts trajectory view
-├── PopoverView.swift            # Main popover UI
-└── MenuBarIconRenderer.swift    # Menu bar icon drawing
+├── ClaudeUsageBarApp.swift       # App entry point, menu bar setup
+├── UsageService.swift            # OAuth, polling, API calls
+├── UsageModel.swift              # API response types
+├── UsageHistoryModel.swift       # History data types, time ranges
+├── UsageHistoryService.swift     # Persistence, downsampling
+├── UsageChartView.swift          # Swift Charts trajectory view
+├── PopoverView.swift             # Main popover UI + reset indicator view
+├── MenuBarIconRenderer.swift     # Menu bar icon drawing + divider rendering
+├── SettingsView.swift            # Settings window + appearance toggles
+├── ResetIndicatorState.swift     # Enum for divider state + color mapping logic
+├── AppearanceSettings.swift      # UserDefaults keys for appearance settings
+├── NotificationService.swift     # Usage threshold notifications
+├── PollingOptionFormatter.swift  # Polling interval display labels
+├── AppUpdater.swift              # Sparkle update integration
+└── Resources/
+    ├── claude-logo.png           # Pre-rendered menu bar logo (512px)
+    └── en.lproj/Localizable.strings
 ```
 
 ## Build commands
@@ -114,6 +123,46 @@ Available scenarios:
 | `error` | Returns 500 |
 
 **Remember to revert the endpoint and Info.plist changes before committing.**
+
+## Testing the service status indicator
+
+### Smoke test against live endpoint
+
+Enable the indicator in Settings → Service Status, then:
+
+1. Confirm the Claude logo is untinted when `https://status.claude.com` shows all systems operational.
+2. Check the popover "Service Status" section lists Claude API, claude.ai, and Claude Code.
+3. Click the section — `https://status.claude.com` must open in the default browser.
+4. Turn the feature off in Settings — confirm polling stops and the logo tint clears.
+
+### Injecting fixture JSON for local testing
+
+The unit tests under `macos/Tests/ClaudeUsageBarTests/Fixtures/` cover the five fixture scenarios. For manual end-to-end testing you can serve a fixture over localhost and redirect `StatusPageClient`:
+
+1. Serve a fixture file:
+   ```sh
+   python3 -m http.server 9090 --directory macos/Tests/ClaudeUsageBarTests/Fixtures
+   ```
+2. In `StatusPageClient.swift`, temporarily change `baseURL`:
+   ```swift
+   private let baseURL = URL(string: "http://127.0.0.1:9090")!
+   // fetch path: /statuspage_summary_partial_outage.json
+   ```
+3. Update the fetch path to match the fixture filename (e.g. `statuspage_summary_major_outage_with_incident.json`).
+4. Add `NSAllowsLocalNetworking` to `Resources/Info.plist` (same pattern as the mock server above).
+5. Rebuild — the menubar logo tint should reflect the fixture's severity.
+
+**Remember to revert all changes before committing.**
+
+Available fixture scenarios:
+
+| Fixture file | Expected logo tint |
+|---|---|
+| `statuspage_summary_all_operational.json` | None (untinted) |
+| `statuspage_summary_partial_outage.json` | Orange |
+| `statuspage_summary_major_outage_with_incident.json` | Red |
+| `statuspage_summary_under_maintenance.json` | None (maintenance = operational) |
+| `statuspage_summary_unknown_status_string.json` | None (unknown status falls back to operational) |
 
 ## Submitting changes
 

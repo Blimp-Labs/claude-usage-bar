@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -12,23 +13,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build release binary
-        run: cd macos && swift build -c release
+      - name: Log Xcode version
+        run: xcodebuild -version
 
-      - name: Run tests
-        run: cd macos && swift test
-
-      - name: Build app archives
-        run: make release-artifacts
-
-      - name: Upload ZIP artifact
-        uses: actions/upload-artifact@v4
+      - name: Cache SPM dependencies
+        uses: actions/cache@v4
         with:
-          name: ClaudeUsageBar.zip
-          path: macos/ClaudeUsageBar.zip
+          path: |
+            macos/.build/checkouts
+            macos/.build/artifacts
+          key: spm-${{ runner.os }}-${{ hashFiles('macos/Package.resolved') }}
+          restore-keys: |
+            spm-${{ runner.os }}-
 
-      - name: Upload DMG artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ClaudeUsageBar.dmg
-          path: macos/ClaudeUsageBar.dmg
+      - name: Run tests with coverage
+        run: cd macos && swift test --enable-code-coverage
+
+      - name: Coverage report
+        run: |
+          xcrun llvm-cov report \
+            macos/.build/debug/ClaudeUsageBarPackageTests.xctest/Contents/MacOS/ClaudeUsageBarPackageTests \
+            -instr-profile macos/.build/debug/codecov/default.profdata \
+            --ignore-filename-regex='\.build|Tests'
+
+      - name: Build app bundle
+        run: make app

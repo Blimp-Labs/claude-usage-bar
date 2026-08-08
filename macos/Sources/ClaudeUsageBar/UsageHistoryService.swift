@@ -1,26 +1,43 @@
 import Foundation
-import Combine
 import AppKit
 
 @MainActor
 class UsageHistoryService: ObservableObject {
     @Published var history = UsageHistory()
 
-    private var flushTimer: AnyCancellable?
-    private var isDirty = false
     private var terminationObserver: Any?
+    let historyFileURL: URL
 
     private static let retentionInterval: TimeInterval = 30 * 86400 // 30 days
-    private static let flushInterval: TimeInterval = 300 // 5 minutes
 
-    private static var historyFileURL: URL {
-        let dir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".config/claude-usage-bar", isDirectory: true)
+    // The canonical location is Application Support, which is accessible inside the
+    // app sandbox and follows macOS data-storage conventions. The legacy location
+    // (~/.config/claude-usage-bar/) is migrated on first use.
+    private static var defaultHistoryFileURL: URL {
+        guard let appSupport = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            // Fallback should never be reached on a standard macOS install.
+            return FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".config/claude-usage-bar/history.json")
+        }
+        let dir = appSupport.appendingPathComponent("claude-usage-bar", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("history.json")
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
+        let destination = dir.appendingPathComponent("history.json")
+        migrateLegacyHistoryFile(to: destination)
+        return destination
     }
 
-    init() {
+    private static func migrateLegacyHistoryFile(to destination: URL) {
+        guard !FileManager.default.fileExists(atPath: destination.path) else { return }
+        let legacy = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".config/claude-usage-bar/history.json")
+        guard FileManager.default.fileExists(atPath: legacy.path) else { return }
+        try? FileManager.default.moveItem(at: legacy, to: destination)
+    }
+
+    init(historyFileURL: URL? = nil) {
+        self.historyFileURL = historyFileURL ?? Self.defaultHistoryFileURL
         terminationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification,
             object: nil, queue: .main
@@ -41,7 +58,7 @@ class UsageHistoryService: ObservableObject {
     // MARK: - Load
 
     func loadHistory() {
-        let url = Self.historyFileURL
+        let url = historyFileURL
         guard FileManager.default.fileExists(atPath: url.path) else { return }
 
         do {
@@ -63,31 +80,32 @@ class UsageHistoryService: ObservableObject {
     func recordDataPoint(pct5h: Double, pct7d: Double) {
         let point = UsageDataPoint(pct5h: pct5h, pct7d: pct7d)
         history.dataPoints.append(point)
-        isDirty = true
-        startFlushTimerIfNeeded()
+        flushToDisk()
     }
 
     // MARK: - Flush
 
     func flushToDisk() {
-        guard isDirty else { return }
         history.dataPoints = pruned(history.dataPoints)
 
         guard let data = try? JSONEncoder.historyEncoder.encode(history) else { return }
-        try? data.write(to: Self.historyFileURL, options: .atomic)
-
-        isDirty = false
-        flushTimer?.cancel()
-        flushTimer = nil
-    }
-
-    private func startFlushTimerIfNeeded() {
-        guard flushTimer == nil else { return }
-        flushTimer = Timer.publish(every: Self.flushInterval, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in
-                self?.flushToDisk()
-            }
+        let url = historyFileURL
+        let tempURL = url.appendingPathExtension("tmp")
+        try? FileManager.default.removeItem(at: tempURL)
+        guard FileManager.default.createFile(
+            atPath: tempURL.path,
+            contents: data,
+            attributes: [.posixPermissions: 0o600]
+        ) else { return }
+        do {
+            _ = try FileManager.default.replaceItemAt(url, withItemAt: tempURL)
+            // replaceItemAt preserves the destination file's metadata by default, so an
+            // existing file created by an older app version may still have world-readable
+            // permissions. Enforce 0600 explicitly on every flush.
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        } catch {
+            try? FileManager.default.removeItem(at: tempURL)
+        }
     }
 
     // MARK: - Downsampling

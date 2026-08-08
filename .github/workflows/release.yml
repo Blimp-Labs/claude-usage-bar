@@ -15,24 +15,45 @@ jobs:
       contents: write
     env:
       REPOSITORY_NAME: ${{ github.event.repository.name }}
+    outputs:
+      appcast_generated: ${{ steps.appcast.outputs.generated }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
+        continue-on-error: true
+
+      - name: Cache SPM dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            macos/.build/checkouts
+            macos/.build/artifacts
+          key: spm-${{ runner.os }}-${{ hashFiles('macos/Package.resolved') }}
+          restore-keys: |
+            spm-${{ runner.os }}-
+
+      - name: Run tests
+        run: cd macos && swift test
 
       - name: Build release app bundle
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
           version="${GITHUB_REF_NAME#v}"
           owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
           export APP_VERSION="$version"
-          export SU_FEED_URL="https://${owner}.github.io/${REPOSITORY_NAME}/appcast.xml"
+          if [[ -n "${SPARKLE_PRIVATE_KEY:-}" ]]; then
+            export SU_FEED_URL="https://${owner}.github.io/${REPOSITORY_NAME}/appcast.xml"
+          fi
           bash macos/scripts/build.sh
 
       - name: Package and verify release artifacts
         env:
-          EXPECT_FEED_URL: '1'
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
+          [[ -n "${SPARKLE_PRIVATE_KEY:-}" ]] && export EXPECT_FEED_URL=1
           bash macos/scripts/build.sh --skip-build --zip --dmg
           make verify-release
 
@@ -86,12 +107,14 @@ jobs:
           body_path: dist/release-notes.md
 
       - name: Generate Sparkle appcast
+        id: appcast
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
           if [[ -z "${SPARKLE_PRIVATE_KEY:-}" ]]; then
-            echo "::error::Missing SPARKLE_PRIVATE_KEY repository secret."
-            exit 1
+            echo "::warning::SPARKLE_PRIVATE_KEY not set — skipping appcast. Sparkle auto-updates will not work for this release."
+            echo "generated=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
           cp macos/ClaudeUsageBar.zip dist/archives/ClaudeUsageBar.zip
@@ -104,13 +127,17 @@ jobs:
               --maximum-deltas 0 \
               -o dist/site/appcast.xml
 
+          echo "generated=true" >> "$GITHUB_OUTPUT"
+
       - name: Upload appcast for GitHub Pages
+        if: steps.appcast.outputs.generated == 'true'
         uses: actions/upload-pages-artifact@v4
         with:
           path: dist/site
 
   deploy_appcast:
     needs: release
+    if: needs.release.outputs.appcast_generated == 'true'
     runs-on: ubuntu-latest
     permissions:
       pages: write

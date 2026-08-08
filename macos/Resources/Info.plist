@@ -2,33 +2,33 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleIdentifier</key>
-    <string>com.local.ClaudeUsageBar</string>
-    <key>CFBundleName</key>
-    <string>ClaudeUsageBar</string>
-    <key>CFBundleDisplayName</key>
-    <string>Claude Usage Bar</string>
-    <key>CFBundleVersion</key>
-    <string>1</string>
-    <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleExecutable</key>
-    <string>ClaudeUsageBar</string>
-    <key>CFBundleIconFile</key>
-    <string>AppIcon</string>
-    <key>CFBundleIconName</key>
-    <string>AppIcon</string>
-    <key>LSUIElement</key>
-    <true/>
-    <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
-    <key>SUEnableAutomaticChecks</key>
-    <true/>
-    <key>SUScheduledCheckInterval</key>
-    <integer>86400</integer>
-    <key>SUPublicEDKey</key>
-    <string>kz41beMlVBUNq3/1hFCroklkNk5aGZGJlLcFxaukDPQ=</string>
+	<key>CFBundleDisplayName</key>
+	<string>Claude Usage Bar</string>
+	<key>CFBundleExecutable</key>
+	<string>ClaudeUsageBar</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.local.ClaudeUsageBar</string>
+	<key>CFBundleName</key>
+	<string>ClaudeUsageBar</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.4.16</string>
+	<key>CFBundleVersion</key>
+	<string>17</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUPublicEDKey</key>
+	<string>kz41beMlVBUNq3/1hFCroklkNk5aGZGJlLcFxaukDPQ=</string>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
 </dict>
 </plist>

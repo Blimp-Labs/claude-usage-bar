@@ -4,4 +4,6 @@
 *.dmg
 *.app/
 .DS_Store
+.vscode/
+.claude/
 xcuserdata/

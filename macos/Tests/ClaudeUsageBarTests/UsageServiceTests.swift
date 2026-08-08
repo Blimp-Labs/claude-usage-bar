@@ -207,7 +207,8 @@ final class UsageServiceTests: XCTestCase {
         await service.fetchUsage()
 
         XCTAssertFalse(service.isAuthenticated)
-        XCTAssertEqual(service.lastError, "Session expired — please sign in again")
+        XCTAssertTrue(service.sessionExpired)
+        XCTAssertNil(service.lastError)
         XCTAssertNil(store.load(defaultScopes: UsageService.defaultOAuthScopes))
     }
 
@@ -442,8 +443,93 @@ final class UsageServiceTests: XCTestCase {
         await service.fetchUsage()
 
         XCTAssertFalse(service.isAuthenticated)
-        XCTAssertEqual(service.lastError, "Session expired — please sign in again")
+        XCTAssertTrue(service.sessionExpired)
+        XCTAssertNil(service.lastError)
         XCTAssertNil(store.load(defaultScopes: UsageService.defaultOAuthScopes))
+    }
+
+    func testSessionExpiredClearedByStartOAuthFlow() async throws {
+        let store = try makeStore()
+        try store.save(
+            StoredCredentials(
+                accessToken: "old-access",
+                refreshToken: "refresh-old",
+                expiresAt: Date().addingTimeInterval(3600),
+                scopes: UsageService.defaultOAuthScopes
+            )
+        )
+
+        let usageURL = URL(string: "https://example.com/api/oauth/usage")!
+        let tokenURL = URL(string: "https://example.com/v1/oauth/token")!
+
+        MockURLProtocol.handler = { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/oauth/usage"):
+                return try Self.httpResponse(url: usageURL, statusCode: 401)
+            case ("POST", "/v1/oauth/token"):
+                return try Self.httpResponse(url: tokenURL, statusCode: 400, body: #"{"error":"invalid_grant"}"#)
+            default:
+                XCTFail("Unexpected request: \(request)")
+                return try Self.httpResponse(url: request.url!, statusCode: 500)
+            }
+        }
+
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: usageURL,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: tokenURL,
+            credentialsStore: store,
+            urlOpener: { _ in true }
+        )
+
+        await service.fetchUsage()
+        XCTAssertTrue(service.sessionExpired)
+
+        service.startOAuthFlow()
+        XCTAssertFalse(service.sessionExpired)
+        XCTAssertTrue(service.isAwaitingCode)
+    }
+
+    func testSessionExpiredClearedBySignOut() async throws {
+        let store = try makeStore()
+        try store.save(
+            StoredCredentials(
+                accessToken: "old-access",
+                refreshToken: "refresh-old",
+                expiresAt: Date().addingTimeInterval(3600),
+                scopes: UsageService.defaultOAuthScopes
+            )
+        )
+
+        let usageURL = URL(string: "https://example.com/api/oauth/usage")!
+        let tokenURL = URL(string: "https://example.com/v1/oauth/token")!
+
+        MockURLProtocol.handler = { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/oauth/usage"):
+                return try Self.httpResponse(url: usageURL, statusCode: 401)
+            case ("POST", "/v1/oauth/token"):
+                return try Self.httpResponse(url: tokenURL, statusCode: 400, body: #"{"error":"invalid_grant"}"#)
+            default:
+                XCTFail("Unexpected request: \(request)")
+                return try Self.httpResponse(url: request.url!, statusCode: 500)
+            }
+        }
+
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: usageURL,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: tokenURL,
+            credentialsStore: store
+        )
+
+        await service.fetchUsage()
+        XCTAssertTrue(service.sessionExpired)
+
+        service.signOut()
+        XCTAssertFalse(service.sessionExpired)
     }
 
     // MARK: - End-to-end refresh recovery simulation
@@ -646,6 +732,77 @@ final class UsageServiceTests: XCTestCase {
         XCTAssertEqual(saved.refreshToken, "refresh-2")
     }
 
+    // MARK: - Sleep / Wake
+
+    func testWakeNotificationTriggersFetch() async throws {
+        let store = try makeStore()
+        try store.save(StoredCredentials(
+            accessToken: "access-1",
+            refreshToken: "refresh-1",
+            expiresAt: Date().addingTimeInterval(3600),
+            scopes: UsageService.defaultOAuthScopes
+        ))
+
+        let usageURL = URL(string: "https://example.com/api/oauth/usage")!
+        let tokenURL = URL(string: "https://example.com/v1/oauth/token")!
+        var fetchCount = 0
+
+        MockURLProtocol.handler = { request in
+            guard request.url?.path == "/api/oauth/usage" else {
+                return try Self.httpResponse(url: request.url!, statusCode: 404)
+            }
+            fetchCount += 1
+            return try Self.httpResponse(
+                url: usageURL,
+                statusCode: 200,
+                body: """
+                {
+                  "five_hour": { "utilization": 50, "resets_at": "2026-03-08T18:00:00Z" },
+                  "seven_day": { "utilization": 20, "resets_at": "2026-03-15T18:00:00Z" }
+                }
+                """
+            )
+        }
+
+        let wakeName = Notification.Name("UsageService.testWake")
+        let center = NotificationCenter()
+
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: usageURL,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: tokenURL,
+            credentialsStore: store,
+            localProfileLoader: { "test@example.com" },
+            notificationCenter: center,
+            wakeNotification: wakeName
+        )
+
+        // startPolling() installs the wake observer and kicks off an initial fetch.
+        service.startPolling()
+
+        // Wait for the initial fetch.
+        let deadline1 = Date().addingTimeInterval(2)
+        while service.lastUpdated == nil, Date() < deadline1 { await Task.yield() }
+        XCTAssertEqual(fetchCount, 1, "startPolling() should trigger one initial fetch")
+
+        let priorUpdated = service.lastUpdated
+
+        // Simulate Mac waking from sleep.
+        center.post(name: wakeName, object: nil)
+
+        // Two yields let the Task { @MainActor } inside the observer closure run and
+        // enqueue the inner fetch Task; then we poll until lastUpdated advances.
+        await Task.yield()
+        await Task.yield()
+
+        let deadline2 = Date().addingTimeInterval(2)
+        while service.lastUpdated == priorUpdated, Date() < deadline2 { await Task.yield() }
+
+        XCTAssertNotEqual(service.lastUpdated, priorUpdated, "Wake notification should trigger a new fetch")
+        XCTAssertEqual(fetchCount, 2, "Wake notification should trigger a second fetch")
+    }
+
     // MARK: - OAuth code submission
 
     /// A whitespace-only paste passes the `code.isEmpty` button guard (which checks
@@ -666,11 +823,150 @@ final class UsageServiceTests: XCTestCase {
         XCTAssertFalse(service.isAuthenticated)
     }
 
+    func testSubmitOAuthCodeRejectsMissingState() async throws {
+        let store = try makeStore()
+        let tokenURL = URL(string: "https://example.com/v1/oauth/token")!
+        var openedURL: URL?
+
+        MockURLProtocol.handler = { request in
+            XCTFail("No network request should be made when state is missing")
+            return try Self.httpResponse(url: request.url!, statusCode: 500)
+        }
+
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: URL(string: "https://example.com/api/oauth/usage")!,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: tokenURL,
+            credentialsStore: store,
+            urlOpener: { url in
+                openedURL = url
+                return true
+            }
+        )
+
+        service.startOAuthFlow()
+        XCTAssertTrue(service.isAwaitingCode)
+        XCTAssertTrue(openedURL?.absoluteString.hasPrefix("https://claude.ai/oauth/authorize") == true)
+
+        await service.submitOAuthCode("some-auth-code")
+
+        XCTAssertFalse(service.isAwaitingCode)
+        XCTAssertFalse(service.isAuthenticated)
+        XCTAssertEqual(service.lastError, "Missing OAuth state — expected code#state format")
+    }
+
+    // MARK: - Code entry rate-limiting (10.9)
+
+    func testCodeAttemptsIncrementOnEmptySubmission() async throws {
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: URL(string: "https://example.com/api/oauth/usage")!,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
+            credentialsStore: try makeStore()
+        )
+        XCTAssertEqual(service.codeAttempts, 0)
+        await service.submitOAuthCode("   ")
+        XCTAssertEqual(service.codeAttempts, 1)
+    }
+
+    func testCodeAttemptsResetOnStartOAuthFlow() async throws {
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: URL(string: "https://example.com/api/oauth/usage")!,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
+            credentialsStore: try makeStore(),
+            urlOpener: { _ in true }
+        )
+        await service.submitOAuthCode("   ")
+        XCTAssertEqual(service.codeAttempts, 1)
+        service.startOAuthFlow()
+        XCTAssertEqual(service.codeAttempts, 0)
+    }
+
+    func testLocksOutAfterMaxFailedAttempts() async throws {
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: URL(string: "https://example.com/api/oauth/usage")!,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
+            credentialsStore: try makeStore(),
+            urlOpener: { _ in true }
+        )
+        service.startOAuthFlow()
+
+        // Exhaust attempts with empty submissions.
+        for _ in 0..<UsageService.maxCodeAttempts {
+            await service.submitOAuthCode("   ")
+        }
+
+        // Next call should trigger lockout regardless of content.
+        await service.submitOAuthCode("   ")
+
+        XCTAssertFalse(service.isAwaitingCode, "Flow must be torn down on lockout")
+        XCTAssertEqual(service.lastError, "Too many failed attempts — please sign in again")
+        XCTAssertEqual(service.codeAttempts, 0, "Counter must reset after lockout")
+    }
+
+    func testSubmitOAuthCodeRejectsStateMismatch() async throws {
+        let store = try makeStore()
+
+        MockURLProtocol.handler = { request in
+            XCTFail("No network request should be made on state mismatch")
+            return try Self.httpResponse(url: request.url!, statusCode: 500)
+        }
+
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: URL(string: "https://example.com/api/oauth/usage")!,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
+            credentialsStore: store,
+            urlOpener: { _ in true }
+        )
+
+        service.startOAuthFlow()
+        XCTAssertTrue(service.isAwaitingCode)
+
+        // Submit a code with a tampered state value.
+        await service.submitOAuthCode("valid-code#tampered-state-value")
+
+        XCTAssertFalse(service.isAuthenticated)
+        XCTAssertFalse(service.isAwaitingCode, "Flow must be torn down after state mismatch")
+        XCTAssertEqual(service.lastError, "OAuth state mismatch — try again")
+    }
+
+    func testStartOAuthFlowFailsCleanlyWhenBrowserCannotOpen() throws {
+        let store = try makeStore()
+        let tokenURL = URL(string: "https://example.com/v1/oauth/token")!
+        var openedURL: URL?
+
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: URL(string: "https://example.com/api/oauth/usage")!,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: tokenURL,
+            credentialsStore: store,
+            urlOpener: { url in
+                openedURL = url
+                return false
+            }
+        )
+
+        service.startOAuthFlow()
+
+        XCTAssertTrue(openedURL?.absoluteString.hasPrefix("https://claude.ai/oauth/authorize") == true)
+        XCTAssertFalse(service.isAwaitingCode)
+        XCTAssertEqual(service.lastError, "Could not open Claude sign-in page")
+    }
+
     private func makeStore() throws -> StoredCredentialsStore {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return StoredCredentialsStore(directoryURL: directory)
+        return StoredCredentialsStore(directoryURL: directory, useKeychain: false)
     }
 
     private func makeSession() -> URLSession {
