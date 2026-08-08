@@ -11,13 +11,6 @@ struct RunOutProjectionView: View {
     private static let logger = Logger(subsystem: "com.local.ClaudeUsageBar", category: "RunOutProjection")
 
     @ObservedObject var service: UsageService
-    /// Called on the main actor whenever `RunOutEstimate.Outcome`'s case (chart shown or not)
-    /// changes. `GeometryReader`/`.preference()`-based size tracking in the ancestor
-    /// `PopoverView` doesn't reliably observe height changes that originate inside this view's
-    /// `TimelineView` — confirmed by a real capture showing zero resize-pipeline activity
-    /// across an observed outcome transition — so the parent needs an explicit signal instead
-    /// of relying on that propagation.
-    var onOutcomeCaseChange: (() -> Void)?
 
     var body: some View {
         // Re-evaluate every minute so "now" and the red line stay live while the popover is
@@ -50,10 +43,6 @@ struct RunOutProjectionView: View {
         }
         .padding(10)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .onChange(of: showsChart) { _, _ in
-            Self.logger.debug("showsChart changed -> \(showsChart, privacy: .public), notifying parent")
-            onOutcomeCaseChange?()
-        }
     }
 
     // MARK: - Status line

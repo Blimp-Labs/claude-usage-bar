@@ -14,7 +14,6 @@ struct PopoverView: View {
     @AppStorage(AppearanceDefaultsKey.showForecast) private var showForecast = true
     @AppStorage(AppearanceDefaultsKey.showRunOutProjection) private var showRunOutProjection = false
     @State private var hostingWindow: NSWindow?
-    @State private var measuredSize: CGSize = .zero
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -42,31 +41,12 @@ struct PopoverView: View {
         .padding()
         .frame(width: 340)
         .background(
-            GeometryReader { geo in
-                Color.clear.preference(key: PopoverContentSizeKey.self, value: geo.size)
-            }
-        )
-        .background(
             PopoverWindowLocator { w in
                 hostingWindow = w
             }
         )
-        .onPreferenceChange(PopoverContentSizeKey.self) { size in
-            Self.resizeLogger.debug(
-                "onPreferenceChange: measuredSize \(String(describing: measuredSize), privacy: .public) -> \(String(describing: size), privacy: .public), hostingWindow=\(hostingWindow != nil, privacy: .public)"
-            )
-            guard size != .zero else { return }
-            measuredSize = size
-            if let hostingWindow {
-                applySize(size, to: hostingWindow)
-            }
-        }
-        .onChange(of: hostingWindow) { _, window in
-            Self.resizeLogger.debug(
-                "onChange(hostingWindow): window=\(window != nil, privacy: .public), measuredSize=\(String(describing: measuredSize), privacy: .public)"
-            )
-            guard let window, measuredSize != .zero else { return }
-            applySize(measuredSize, to: window)
+        .onReceive(Timer.publish(every: 0.15, on: .main, in: .common).autoconnect()) { _ in
+            reconcileSize()
         }
     }
 
@@ -171,7 +151,7 @@ struct PopoverView: View {
         UsageChartView(historyService: historyService)
 
         if showRunOutProjection {
-            RunOutProjectionView(service: service, onOutcomeCaseChange: forceResize)
+            RunOutProjectionView(service: service)
         }
 
         if let error = service.lastError {
@@ -272,54 +252,27 @@ struct PopoverView: View {
         }
     }
 
-    /// `RunOutProjectionView`'s outcome-driven height change doesn't reach `PopoverContentSizeKey`
-    /// (its `TimelineView` doesn't renegotiate its own size with its ancestors when its content's
-    /// shape changes — confirmed by a device capture showing zero resize activity across an
-    /// observed transition). Sidestep the preference pipeline for this signal and ask AppKit
-    /// directly for the hosting view's current ideal size instead.
-    private func forceResize() {
-        guard let hostingWindow else { return }
-        // The SwiftUI state change that triggered this callback needs a run loop turn to reach
-        // the underlying NSView tree before fittingSize/intrinsicContentSize reflect it.
-        DispatchQueue.main.async {
-            guard let contentView = hostingWindow.contentView else { return }
-            contentView.layoutSubtreeIfNeeded()
-
-            Self.resizeLogger.debug(
-                "forceResize: contentView=\(String(describing: type(of: contentView)), privacy: .public) frame=\(String(describing: contentView.frame), privacy: .public) fittingSize=\(String(describing: contentView.fittingSize), privacy: .public) intrinsic=\(String(describing: contentView.intrinsicContentSize), privacy: .public)"
-            )
-            for (i, sub) in contentView.subviews.enumerated() {
-                Self.resizeLogger.debug(
-                    "forceResize: subview[\(i, privacy: .public)]=\(String(describing: type(of: sub)), privacy: .public) frame=\(String(describing: sub.frame), privacy: .public) fittingSize=\(String(describing: sub.fittingSize), privacy: .public) intrinsic=\(String(describing: sub.intrinsicContentSize), privacy: .public)"
-                )
-                for (j, subsub) in sub.subviews.enumerated() {
-                    Self.resizeLogger.debug(
-                        "forceResize: subview[\(i, privacy: .public)][\(j, privacy: .public)]=\(String(describing: type(of: subsub)), privacy: .public) frame=\(String(describing: subsub.frame), privacy: .public) fittingSize=\(String(describing: subsub.fittingSize), privacy: .public) intrinsic=\(String(describing: subsub.intrinsicContentSize), privacy: .public)"
-                    )
-                }
-            }
-
-            // Try, in order: the content view's own intrinsic size, its fitting size, then the
-            // same two on its first subview — whichever first reports something real wins.
-            let noIntrinsic = NSView.noIntrinsicMetric
-            let candidates = [
-                contentView.intrinsicContentSize,
-                contentView.fittingSize,
-                contentView.subviews.first?.intrinsicContentSize,
-                contentView.subviews.first?.fittingSize,
-            ].compactMap { $0 }
-            guard
-                let resolved = candidates.first(where: {
-                    $0 != .zero && $0.width != noIntrinsic && $0.height != noIntrinsic
-                })
-            else {
-                Self.resizeLogger.debug("forceResize: no usable size candidate, giving up")
-                return
-            }
-            Self.resizeLogger.debug("forceResize: resolved=\(String(describing: resolved), privacy: .public)")
-            measuredSize = resolved
-            applySize(resolved, to: hostingWindow)
-        }
+    /// No SwiftUI-side signal reliably reaches the window when live content changes shape
+    /// while the popover is open — a device capture showed the `GeometryReader`/`.preference()`
+    /// pipeline that used to live here firing exactly once, with a `.zero` value, at launch,
+    /// and never again for the rest of the session, regardless of what changed (the run-out
+    /// card's chart, a rate-limit notice label, ...). `fittingSize`/`intrinsicContentSize` are
+    /// also dead ends for this content view — a capture showed both reporting zero/no-metric
+    /// throughout. But the same capture showed the content view's *first subview* already
+    /// sitting at the correct, up-to-date rendered size (SwiftUI lays it out correctly) — it's
+    /// just centered inside the still-stale, oversized window frame instead of that frame being
+    /// resized to match. So instead of chasing individual change signals, poll the rendered
+    /// size directly off that subview and correct the window frame whenever it drifts.
+    private func reconcileSize() {
+        guard let hostingWindow, hostingWindow.isVisible,
+            let contentView = hostingWindow.contentView,
+            let rendered = contentView.subviews.first?.frame.size, rendered != .zero,
+            rendered != contentView.frame.size
+        else { return }
+        Self.resizeLogger.debug(
+            "reconcileSize: contentView.frame=\(String(describing: contentView.frame), privacy: .public) -> rendered=\(String(describing: rendered), privacy: .public)"
+        )
+        applySize(rendered, to: hostingWindow)
     }
 
     private func refresh() {
@@ -776,11 +729,6 @@ struct ServiceStatusSection: View {
 }
 
 // MARK: - Adaptive window sizing
-
-private struct PopoverContentSizeKey: PreferenceKey {
-    static var defaultValue: CGSize = .zero
-    static func reduce(value: inout CGSize, nextValue: () -> CGSize) { value = nextValue() }
-}
 
 private final class WindowObservingView: NSView {
     var onWindow: ((NSWindow) -> Void)?
