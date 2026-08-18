@@ -74,15 +74,14 @@ struct PopoverView: View {
             bucket: service.usage?.sevenDay
         )
 
-        if let opus = service.usage?.sevenDayOpus,
-           opus.utilization != nil {
+        let perModel = service.usage?.perModelWeekly ?? []
+        if !perModel.isEmpty {
             Divider()
             Text("Per-Model (7 day)")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-            UsageBucketRow(label: "Opus", bucket: opus)
-            if let sonnet = service.usage?.sevenDaySonnet {
-                UsageBucketRow(label: "Sonnet", bucket: sonnet)
+            ForEach(perModel) { entry in
+                UsageBucketRow(label: entry.displayName, bucket: entry.bucket)
             }
         }
 

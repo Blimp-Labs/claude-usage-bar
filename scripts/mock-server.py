@@ -12,16 +12,21 @@ Scenarios:
     low             - Barely used (5h: 2%, 7d: 5%)
     extra           - Extra usage enabled with credits
     extra_high      - Extra usage near limit
-    per_model       - Per-model breakdown (Opus + Sonnet)
+    per_model       - Per-model breakdown via legacy seven_day_* fields (Opus + Sonnet)
+    model_scoped    - Per-model breakdown via limits[] (Fable 5 + Opus + Sonnet)
+    model_scoped_no_reset
+                    - limits[] entry with a null resets_at (exercises reconciliation)
+    fable_mixed     - Fable 5 via limits[], Opus/Sonnet via legacy seven_day_* fields
     all_features    - Everything enabled: per-model, extra usage
     unauthenticated - Returns 401 for all requests
     rate_limited    - Returns 429 with Retry-After header
     error           - Returns 500 server error
 
-To point the app at this server, modify UsageService.swift:
-    private let usageEndpoint = URL(string: "http://localhost:8080/api/oauth/usage")!
+To point the app at this server, set the endpoint override before launching it:
+    CLAUDE_USAGE_BAR_USAGE_ENDPOINT=http://127.0.0.1:8080/api/oauth/usage \
+        macos/ClaudeUsageBar.app/Contents/MacOS/ClaudeUsageBar
 
-Then restart the app. This only mocks the usage endpoint for refresh/testing.
+Only loopback hosts are honoured. This only mocks the usage endpoint for refresh/testing.
 The server also exposes a fake /v1/oauth/token endpoint for manual experiments,
 but the app does not use it unless you explicitly repoint its auth flow too.
 """
@@ -36,6 +41,17 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 def iso_future(hours=0, days=0):
     dt = datetime.now(timezone.utc) + timedelta(hours=hours, days=days)
     return dt.strftime("%Y-%m-%dT%H:%M:%S.%f+00:00")
+
+
+def weekly_scoped(display_name, percent, days=5, resets=True):
+    """A model-scoped weekly window, as returned in the `limits` array."""
+    return {
+        "kind": "weekly_scoped",
+        "group": "subscription",
+        "percent": percent,
+        "resets_at": iso_future(days=days) if resets else None,
+        "scope": {"model": {"display_name": display_name}},
+    }
 
 
 SCENARIOS = {
@@ -144,14 +160,65 @@ SCENARIOS = {
             "utilization": None,
         },
     },
+    "model_scoped": {
+        "five_hour": {"utilization": 35.0, "resets_at": iso_future(hours=3)},
+        "seven_day": {"utilization": 55.0, "resets_at": iso_future(days=4)},
+        "seven_day_opus": None,
+        "seven_day_sonnet": None,
+        "seven_day_oauth_apps": None,
+        "limits": [
+            weekly_scoped("Fable 5", 48.5),
+            weekly_scoped("Opus", 70.0),
+            weekly_scoped("Sonnet", 15.0),
+        ],
+        "extra_usage": {
+            "is_enabled": False,
+            "monthly_limit": None,
+            "used_credits": None,
+            "utilization": None,
+        },
+    },
+    "model_scoped_no_reset": {
+        "five_hour": {"utilization": 35.0, "resets_at": iso_future(hours=3)},
+        "seven_day": {"utilization": 55.0, "resets_at": iso_future(days=4)},
+        "seven_day_opus": None,
+        "seven_day_sonnet": None,
+        "seven_day_oauth_apps": None,
+        "limits": [weekly_scoped("Fable 5", 52.0, resets=False)],
+        "extra_usage": {
+            "is_enabled": False,
+            "monthly_limit": None,
+            "used_credits": None,
+            "utilization": None,
+        },
+    },
+    "fable_mixed": {
+        "five_hour": {"utilization": 35.0, "resets_at": iso_future(hours=3)},
+        "seven_day": {"utilization": 55.0, "resets_at": iso_future(days=4)},
+        "seven_day_opus": {"utilization": 70.0, "resets_at": iso_future(days=5)},
+        "seven_day_sonnet": {"utilization": 15.0, "resets_at": iso_future(days=5)},
+        "seven_day_oauth_apps": None,
+        "limits": [weekly_scoped("Fable 5", 48.5)],
+        "extra_usage": {
+            "is_enabled": True,
+            "monthly_limit": 28000,
+            "used_credits": 5230,
+            "utilization": 18.68,
+        },
+    },
     "all_features": {
         "five_hour": {"utilization": 62.0, "resets_at": iso_future(hours=2)},
         "seven_day": {"utilization": 78.0, "resets_at": iso_future(days=3)},
-        "seven_day_opus": {"utilization": 88.0, "resets_at": iso_future(days=4)},
-        "seven_day_sonnet": {"utilization": 25.0, "resets_at": iso_future(days=4)},
+        "seven_day_opus": None,
+        "seven_day_sonnet": None,
         "seven_day_oauth_apps": None,
         "seven_day_cowork": None,
         "iguana_necktie": None,
+        "limits": [
+            weekly_scoped("Fable 5", 64.0, days=4),
+            weekly_scoped("Opus", 88.0, days=4),
+            weekly_scoped("Sonnet", 25.0, days=4),
+        ],
         "extra_usage": {
             "is_enabled": True,
             "monthly_limit": 50000,
@@ -258,7 +325,9 @@ class MockHandler(BaseHTTPRequestHandler):
 
 def main():
     parser = argparse.ArgumentParser(description="Mock Anthropic usage API server")
-    parser.add_argument("--port", type=int, default=8080, help="Port to listen on")
+    parser.add_argument(
+        "--port", type=int, default=8080, help="Port to listen on (0 picks a free one)"
+    )
     parser.add_argument(
         "--scenario",
         default="normal",
@@ -271,7 +340,11 @@ def main():
     server = HTTPServer(("127.0.0.1", args.port), MockHandler)
     server.scenario = args.scenario
 
-    print(f"Mock server running on http://127.0.0.1:{args.port}")
+    # Report the bound port, not the requested one: --port 0 picks a free port,
+    # which lets callers (e.g. the integration tests) run without racing.
+    port = server.server_address[1]
+
+    print(f"Mock server running on http://127.0.0.1:{port}", flush=True)
     print(f"Scenario: {args.scenario}")
     print()
     print("Available scenarios:")
@@ -279,13 +352,13 @@ def main():
         print(f"  --scenario {name}")
     print()
     print("Switch scenario at runtime:")
-    print(f"  curl http://127.0.0.1:{args.port}/scenario/high")
-    print(f"  curl http://127.0.0.1:{args.port}/scenario/low")
+    print(f"  curl http://127.0.0.1:{port}/scenario/high")
+    print(f"  curl http://127.0.0.1:{port}/scenario/low")
     print()
     print("Test notification flow:")
-    print(f"  1. Point app at http://127.0.0.1:{args.port}")
+    print(f"  1. Point app at http://127.0.0.1:{port}")
     print(f"  2. Start with: --scenario low")
-    print(f"  3. Wait for one poll, then: curl http://127.0.0.1:{args.port}/scenario/high")
+    print(f"  3. Wait for one poll, then: curl http://127.0.0.1:{port}/scenario/high")
     print(f"  4. Next poll should trigger a notification")
     print()
 

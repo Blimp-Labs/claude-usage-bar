@@ -39,6 +39,24 @@ class UsageService: ObservableObject {
     nonisolated private static let defaultUserinfoEndpoint = URL(string: "https://api.anthropic.com/api/oauth/userinfo")!
     nonisolated private static let defaultTokenEndpoint = URL(string: "https://platform.claude.com/v1/oauth/token")!
     nonisolated private static let defaultRedirectURI = "https://platform.claude.com/oauth/code/callback"
+    nonisolated static let usageEndpointOverrideKey = "CLAUDE_USAGE_BAR_USAGE_ENDPOINT"
+
+    /// Endpoint override for testing against `scripts/mock-server.py`.
+    ///
+    /// Only loopback hosts are honoured — the request carries an OAuth bearer
+    /// token, so an environment variable must never be able to redirect it off
+    /// this machine.
+    nonisolated static func resolvedUsageEndpoint(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> URL {
+        guard let raw = environment[usageEndpointOverrideKey],
+              let url = URL(string: raw),
+              let host = url.host?.lowercased(),
+              ["localhost", "127.0.0.1", "::1"].contains(host) else {
+            return defaultUsageEndpoint
+        }
+        return url
+    }
 
     @Published private(set) var pollingMinutes: Int
 
@@ -77,7 +95,7 @@ class UsageService: ObservableObject {
 
     init(
         session: URLSession = .shared,
-        usageEndpoint: URL = UsageService.defaultUsageEndpoint,
+        usageEndpoint: URL = UsageService.resolvedUsageEndpoint(),
         userinfoEndpoint: URL = UsageService.defaultUserinfoEndpoint,
         tokenEndpoint: URL = UsageService.defaultTokenEndpoint,
         redirectUri: String = UsageService.defaultRedirectURI,

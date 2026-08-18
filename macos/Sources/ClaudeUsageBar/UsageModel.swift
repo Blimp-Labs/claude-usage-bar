@@ -6,6 +6,9 @@ struct UsageResponse: Codable {
     let sevenDayOpus: UsageBucket?
     let sevenDaySonnet: UsageBucket?
     let extraUsage: ExtraUsage?
+    /// Server-driven per-scope windows. Newer accounts report per-model weekly
+    /// usage here instead of through the fixed `seven_day_*` fields.
+    let limits: [UsageLimit]?
 
     enum CodingKeys: String, CodingKey {
         case fiveHour = "five_hour"
@@ -13,6 +16,42 @@ struct UsageResponse: Codable {
         case sevenDayOpus = "seven_day_opus"
         case sevenDaySonnet = "seven_day_sonnet"
         case extraUsage = "extra_usage"
+        case limits
+    }
+
+    init(
+        fiveHour: UsageBucket? = nil,
+        sevenDay: UsageBucket? = nil,
+        sevenDayOpus: UsageBucket? = nil,
+        sevenDaySonnet: UsageBucket? = nil,
+        extraUsage: ExtraUsage? = nil,
+        limits: [UsageLimit]? = nil
+    ) {
+        self.fiveHour = fiveHour
+        self.sevenDay = sevenDay
+        self.sevenDayOpus = sevenDayOpus
+        self.sevenDaySonnet = sevenDaySonnet
+        self.extraUsage = extraUsage
+        self.limits = limits
+    }
+
+    /// Per-model weekly windows, newest source first: entries from `limits`
+    /// win, and the fixed `seven_day_*` fields fill in models they don't cover.
+    var perModelWeekly: [PerModelUsage] {
+        var result = (limits ?? []).compactMap(\.perModelWeekly)
+
+        func appendFixedField(_ displayName: String, _ bucket: UsageBucket?) {
+            guard let bucket, bucket.utilization != nil else { return }
+            let alreadyCovered = result.contains {
+                $0.displayName.localizedCaseInsensitiveContains(displayName)
+            }
+            guard !alreadyCovered else { return }
+            result.append(PerModelUsage(displayName: displayName, bucket: bucket))
+        }
+
+        appendFixedField("Opus", sevenDayOpus)
+        appendFixedField("Sonnet", sevenDaySonnet)
+        return result
     }
 
     func reconciled(with previous: UsageResponse?, now: Date = Date()) -> UsageResponse {
@@ -37,8 +76,142 @@ struct UsageResponse: Codable {
                 resetInterval: 7 * 24 * 60 * 60,
                 now: now
             ),
-            extraUsage: extraUsage
+            extraUsage: extraUsage,
+            limits: limits.map { current in
+                current.map { limit in
+                    limit.reconciled(
+                        with: previous?.limits?.first { $0.hasSameScope(as: limit) },
+                        now: now
+                    )
+                }
+            }
         )
+    }
+}
+
+/// One per-model row in the popover's per-model section.
+struct PerModelUsage: Identifiable {
+    let displayName: String
+    let bucket: UsageBucket
+
+    var id: String { displayName }
+}
+
+struct UsageLimit: Codable {
+    let kind: String?
+    let group: String?
+    let percent: Double?
+    let resetsAt: String?
+    let scope: UsageLimitScope?
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case group
+        case percent
+        case scope
+        case resetsAt = "resets_at"
+    }
+
+    init(
+        kind: String? = nil,
+        group: String? = nil,
+        percent: Double? = nil,
+        resetsAt: String? = nil,
+        scope: UsageLimitScope? = nil
+    ) {
+        self.kind = kind
+        self.group = group
+        self.percent = percent
+        self.resetsAt = resetsAt
+        self.scope = scope
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try container.decodeIfPresent(String.self, forKey: .kind)
+        group = try container.decodeIfPresent(String.self, forKey: .group)
+        percent = try container.decodeIfPresent(Double.self, forKey: .percent)
+        scope = try container.decodeIfPresent(UsageLimitScope.self, forKey: .scope)
+
+        // Normally ISO-8601, but the field can also arrive as epoch seconds.
+        // A nil here means absent, null, or "not a number" — all handled by the
+        // string branch, which yields nil for the first two.
+        if let epoch = try? container.decodeIfPresent(Double.self, forKey: .resetsAt) {
+            resetsAt = Self.isoString(fromEpochSeconds: epoch)
+        } else {
+            resetsAt = try container.decodeIfPresent(String.self, forKey: .resetsAt)
+        }
+    }
+
+    var isWeeklyScoped: Bool { kind == "weekly_scoped" }
+
+    /// A model-scoped weekly window, or nil when this entry scopes something else.
+    var perModelWeekly: PerModelUsage? {
+        guard isWeeklyScoped, percent != nil else { return nil }
+        guard let displayName = scope?.model?.displayName, !displayName.isEmpty else { return nil }
+        return PerModelUsage(
+            displayName: displayName,
+            bucket: UsageBucket(utilization: percent, resetsAt: resetsAt)
+        )
+    }
+
+    func hasSameScope(as other: UsageLimit) -> Bool {
+        kind == other.kind
+            && group == other.group
+            && scope?.model?.displayName == other.scope?.model?.displayName
+            && scope?.surface?.displayName == other.scope?.surface?.displayName
+    }
+
+    func reconciled(with previous: UsageLimit?, now: Date) -> UsageLimit {
+        guard let resetInterval else { return self }
+
+        let resolved = UsageBucket(utilization: percent, resetsAt: resetsAt)
+            .reconciled(
+                with: previous.map { UsageBucket(utilization: $0.percent, resetsAt: $0.resetsAt) },
+                resetInterval: resetInterval,
+                now: now
+            )
+
+        return UsageLimit(
+            kind: kind,
+            group: group,
+            percent: percent,
+            resetsAt: resolved.resetsAt,
+            scope: scope
+        )
+    }
+
+    /// Only weekly windows have a cadence we can extrapolate a missing reset from.
+    private var resetInterval: TimeInterval? {
+        isWeeklyScoped ? 7 * 24 * 60 * 60 : nil
+    }
+
+    private static func isoString(fromEpochSeconds seconds: Double) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.string(from: Date(timeIntervalSince1970: seconds))
+    }
+}
+
+struct UsageLimitScope: Codable {
+    let model: UsageLimitDescriptor?
+    let surface: UsageLimitDescriptor?
+
+    init(model: UsageLimitDescriptor? = nil, surface: UsageLimitDescriptor? = nil) {
+        self.model = model
+        self.surface = surface
+    }
+}
+
+struct UsageLimitDescriptor: Codable {
+    let displayName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case displayName = "display_name"
+    }
+
+    init(displayName: String?) {
+        self.displayName = displayName
     }
 }
 
