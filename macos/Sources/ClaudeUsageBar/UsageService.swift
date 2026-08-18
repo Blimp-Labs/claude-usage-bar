@@ -40,22 +40,43 @@ class UsageService: ObservableObject {
     nonisolated private static let defaultTokenEndpoint = URL(string: "https://platform.claude.com/v1/oauth/token")!
     nonisolated private static let defaultRedirectURI = "https://platform.claude.com/oauth/code/callback"
     nonisolated static let usageEndpointOverrideKey = "CLAUDE_USAGE_BAR_USAGE_ENDPOINT"
+    nonisolated private static let loopbackHosts: Set<String> = ["localhost", "127.0.0.1", "::1"]
 
     /// Endpoint override for testing against `scripts/mock-server.py`.
     ///
-    /// Only loopback hosts are honoured — the request carries an OAuth bearer
-    /// token, so an environment variable must never be able to redirect it off
-    /// this machine.
+    /// Only http(s) loopback URLs are honoured — the request carries an OAuth
+    /// bearer token, so an environment variable must never be able to redirect
+    /// it off this machine. A rejected value is logged rather than silently
+    /// ignored, so a typo doesn't look like the mock server being hit.
     nonisolated static func resolvedUsageEndpoint(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
-        guard let raw = environment[usageEndpointOverrideKey],
-              let url = URL(string: raw),
+        let raw = environment[usageEndpointOverrideKey]?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !raw.isEmpty else { return defaultUsageEndpoint }
+
+        guard let url = URL(string: raw),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
               let host = url.host?.lowercased(),
-              ["localhost", "127.0.0.1", "::1"].contains(host) else {
+              loopbackHosts.contains(host) else {
+            print("""
+            [UsageService] Ignoring \(usageEndpointOverrideKey)="\(raw)" \
+            — only http(s) loopback URLs are allowed. \
+            Using \(defaultUsageEndpoint.absoluteString).
+            """)
             return defaultUsageEndpoint
         }
+
+        print("[UsageService] Using overridden usage endpoint \(url.absoluteString)")
         return url
+    }
+
+    /// True when the usage endpoint points at a local mock rather than the real
+    /// API. A mock's 401 must never be treated as the real session expiring.
+    nonisolated private static func isLoopback(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return false }
+        return loopbackHosts.contains(host)
     }
 
     @Published private(set) var pollingMinutes: Int
@@ -282,7 +303,13 @@ class UsageService: ObservableObject {
         }
 
         do {
-            guard let result = try await sendAuthorizedRequest(to: usageEndpoint) else {
+            // A local mock returning 401 must not delete the user's real
+            // credentials — the token endpoint is not overridable, so the
+            // refresh-then-retry path would otherwise sign them out for real.
+            guard let result = try await sendAuthorizedRequest(
+                to: usageEndpoint,
+                expireSessionOnAuthFailure: !Self.isLoopback(usageEndpoint)
+            ) else {
                 return
             }
             let (data, http) = result

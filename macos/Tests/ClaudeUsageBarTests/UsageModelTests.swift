@@ -207,6 +207,133 @@ final class UsageModelTests: XCTestCase {
         XCTAssertNil(reconciled.perModelWeekly.first?.bucket.resetsAtDate)
     }
 
+    func testTwoWindowsForOneModelGetDistinctIdsAndLabels() throws {
+        let response = try decode("""
+        {
+          "limits": [
+            {"kind": "weekly_scoped", "group": "subscription", "percent": 48.5,
+             "resets_at": null, "scope": {"model": {"display_name": "Fable 5"}}},
+            {"kind": "weekly_scoped", "group": "subscription", "percent": 12.0,
+             "resets_at": null,
+             "scope": {"model": {"display_name": "Fable 5"},
+                       "surface": {"display_name": "Cowork"}}}
+          ]
+        }
+        """)
+
+        let rows = response.perModelWeekly
+        XCTAssertEqual(rows.map(\.displayName), ["Fable 5", "Fable 5 (Cowork)"])
+        XCTAssertEqual(Set(rows.map(\.id)).count, 2, "ForEach ids must not collide")
+    }
+
+    func testFixedFieldRowsHaveStableIdsDistinctFromLimits() throws {
+        let response = try decode("""
+        {
+          "seven_day_opus": {"utilization": 71.0, "resets_at": null},
+          "seven_day_sonnet": {"utilization": 15.0, "resets_at": null}
+        }
+        """)
+
+        XCTAssertEqual(response.perModelWeekly.map(\.id), ["seven_day_opus", "seven_day_sonnet"])
+    }
+
+    func testPerModelWeeklySkipsEmptyDisplayNames() throws {
+        let response = try decode("""
+        {
+          "limits": [
+            {"kind": "weekly_scoped", "group": "subscription", "percent": 48.5,
+             "resets_at": null, "scope": {"model": {"display_name": ""}}}
+          ]
+        }
+        """)
+
+        XCTAssertTrue(response.perModelWeekly.isEmpty)
+    }
+
+    func testFixedFieldWithoutUtilizationIsNotRendered() throws {
+        let response = try decode("""
+        {"seven_day_opus": {"utilization": null, "resets_at": "2026-03-10T00:00:00Z"}}
+        """)
+
+        XCTAssertTrue(response.perModelWeekly.isEmpty)
+    }
+
+    func testReconcileCarriesResetWhenTheServerRelabelsTheGroup() throws {
+        let previous = try decode("""
+        {
+          "limits": [
+            {"kind": "weekly_scoped", "group": "subscription", "percent": 99.0,
+             "resets_at": "2026-03-05T18:00:00Z",
+             "scope": {"model": {"display_name": "Fable 5"}}}
+          ]
+        }
+        """)
+        let current = try decode("""
+        {
+          "limits": [
+            {"kind": "weekly_scoped", "group": "overage_included", "percent": 1.0,
+             "resets_at": null,
+             "scope": {"model": {"display_name": "Fable 5"}}}
+          ]
+        }
+        """)
+
+        let reconciled = current.reconciled(with: previous, now: date("2026-03-05T18:05:00Z"))
+
+        XCTAssertEqual(
+            reconciled.perModelWeekly.first?.bucket.resetsAtDate,
+            date("2026-03-12T18:00:00Z")
+        )
+    }
+
+    func testReconcilePrefersTheExactScopeMatchOverTheGroupAgnosticOne() throws {
+        let previous = try decode("""
+        {
+          "limits": [
+            {"kind": "weekly_scoped", "group": "other", "percent": 99.0,
+             "resets_at": "2026-03-01T18:00:00Z",
+             "scope": {"model": {"display_name": "Fable 5"}}},
+            {"kind": "weekly_scoped", "group": "subscription", "percent": 99.0,
+             "resets_at": "2026-03-05T18:00:00Z",
+             "scope": {"model": {"display_name": "Fable 5"}}}
+          ]
+        }
+        """)
+        let current = try decode("""
+        {
+          "limits": [
+            {"kind": "weekly_scoped", "group": "subscription", "percent": 1.0,
+             "resets_at": null,
+             "scope": {"model": {"display_name": "Fable 5"}}}
+          ]
+        }
+        """)
+
+        let reconciled = current.reconciled(with: previous, now: date("2026-03-05T18:05:00Z"))
+
+        XCTAssertEqual(
+            reconciled.perModelWeekly.first?.bucket.resetsAtDate,
+            date("2026-03-12T18:00:00Z")
+        )
+    }
+
+    func testReconcilePreservesExtraUsage() throws {
+        let current = try decode("""
+        {
+          "five_hour": {"utilization": 10.0, "resets_at": "2026-03-05T18:00:00Z"},
+          "extra_usage": {"is_enabled": true, "monthly_limit": 28000,
+                          "used_credits": 5230, "utilization": 18.68}
+        }
+        """)
+
+        let reconciled = current.reconciled(with: nil, now: date("2026-03-05T17:00:00Z"))
+
+        XCTAssertEqual(reconciled.extraUsage?.isEnabled, true)
+        XCTAssertEqual(reconciled.extraUsage?.usedCredits, 5230)
+        XCTAssertEqual(reconciled.extraUsage?.monthlyLimit, 28000)
+        XCTAssertEqual(reconciled.extraUsage?.utilization, 18.68)
+    }
+
     private func decode(_ json: String) throws -> UsageResponse {
         try JSONDecoder().decode(UsageResponse.self, from: Data(json.utf8))
     }

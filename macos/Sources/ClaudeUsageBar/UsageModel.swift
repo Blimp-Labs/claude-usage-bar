@@ -40,17 +40,17 @@ struct UsageResponse: Codable {
     var perModelWeekly: [PerModelUsage] {
         var result = (limits ?? []).compactMap(\.perModelWeekly)
 
-        func appendFixedField(_ displayName: String, _ bucket: UsageBucket?) {
+        func appendFixedField(id: String, displayName: String, bucket: UsageBucket?) {
             guard let bucket, bucket.utilization != nil else { return }
             let alreadyCovered = result.contains {
                 $0.displayName.localizedCaseInsensitiveContains(displayName)
             }
             guard !alreadyCovered else { return }
-            result.append(PerModelUsage(displayName: displayName, bucket: bucket))
+            result.append(PerModelUsage(id: id, displayName: displayName, bucket: bucket))
         }
 
-        appendFixedField("Opus", sevenDayOpus)
-        appendFixedField("Sonnet", sevenDaySonnet)
+        appendFixedField(id: "seven_day_opus", displayName: "Opus", bucket: sevenDayOpus)
+        appendFixedField(id: "seven_day_sonnet", displayName: "Sonnet", bucket: sevenDaySonnet)
         return result
     }
 
@@ -79,10 +79,10 @@ struct UsageResponse: Codable {
             extraUsage: extraUsage,
             limits: limits.map { current in
                 current.map { limit in
-                    limit.reconciled(
-                        with: previous?.limits?.first { $0.hasSameScope(as: limit) },
-                        now: now
-                    )
+                    let earlier = previous?.limits
+                    let match = earlier?.first { $0.hasSameScope(as: limit) }
+                        ?? earlier?.first { $0.hasSameModelScope(as: limit) }
+                    return limit.reconciled(with: match, now: now)
                 }
             }
         )
@@ -91,10 +91,12 @@ struct UsageResponse: Codable {
 
 /// One per-model row in the popover's per-model section.
 struct PerModelUsage: Identifiable {
+    /// Derived from the full scope, not just the model name: two weekly windows
+    /// can name the same model and differ only by surface or group, and SwiftUI
+    /// mis-diffs a `ForEach` whose ids collide.
+    let id: String
     let displayName: String
     let bucket: UsageBucket
-
-    var id: String { displayName }
 }
 
 struct UsageLimit: Codable {
@@ -148,16 +150,30 @@ struct UsageLimit: Codable {
     /// A model-scoped weekly window, or nil when this entry scopes something else.
     var perModelWeekly: PerModelUsage? {
         guard isWeeklyScoped, percent != nil else { return nil }
-        guard let displayName = scope?.model?.displayName, !displayName.isEmpty else { return nil }
+        guard let model = scope?.model?.displayName, !model.isEmpty else { return nil }
+
+        let rawSurface = scope?.surface?.displayName
+        let surface = (rawSurface?.isEmpty == false) ? rawSurface : nil
+
         return PerModelUsage(
-            displayName: displayName,
+            id: [kind, group, model, surface]
+                .map { $0 ?? "" }
+                .joined(separator: "\u{1F}"),
+            displayName: surface.map { "\(model) (\($0))" } ?? model,
             bucket: UsageBucket(utilization: percent, resetsAt: resetsAt)
         )
     }
 
+    /// Exact match, including `group`.
     func hasSameScope(as other: UsageLimit) -> Bool {
+        hasSameModelScope(as: other) && group == other.group
+    }
+
+    /// Same window for the same model and surface, ignoring `group`. The server
+    /// can relabel a model's group between polls, and a reset should still carry
+    /// over when it does.
+    func hasSameModelScope(as other: UsageLimit) -> Bool {
         kind == other.kind
-            && group == other.group
             && scope?.model?.displayName == other.scope?.model?.displayName
             && scope?.surface?.displayName == other.scope?.surface?.displayName
     }

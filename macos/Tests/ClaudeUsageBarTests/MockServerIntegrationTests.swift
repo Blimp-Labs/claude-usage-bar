@@ -91,6 +91,10 @@ final class MockServerIntegrationTests: XCTestCase {
             service.usage?.perModelWeekly.map(\.displayName),
             ["Fable 5", "Opus", "Sonnet"]
         )
+        XCTAssertEqual(
+            service.usage?.perModelWeekly.map { $0.bucket.utilization },
+            [48.5, 70.0, 15.0]
+        )
     }
 
     /// A model-scoped window that arrives without a reset should inherit the
@@ -106,6 +110,8 @@ final class MockServerIntegrationTests: XCTestCase {
         await service.fetchUsage()
 
         XCTAssertEqual(service.usage?.perModelWeekly.first?.displayName, "Fable 5")
+        // The reset carries over, but the percentage must still be the new one.
+        XCTAssertEqual(service.usage?.perModelWeekly.first?.bucket.utilization, 52.0)
         // Carrying a reset forward re-serialises it without fractional seconds,
         // so compare at whole-second resolution.
         let carried = try XCTUnwrap(service.usage?.perModelWeekly.first?.bucket.resetsAtDate)
@@ -114,6 +120,34 @@ final class MockServerIntegrationTests: XCTestCase {
             firstReset.timeIntervalSince1970,
             accuracy: 1.0
         )
+    }
+
+    // MARK: - Credentials are never destroyed by a local mock
+
+    /// The token endpoint is not overridable, so a mock 401 used to drive
+    /// refresh-then-retry against the real API and then delete the user's
+    /// credentials. Pointing at loopback must never sign anyone out.
+    func testLocalMockAuthFailureDoesNotDeleteCredentials() async throws {
+        let (service, store) = try makeServiceAndStore()
+
+        try await setScenario("unauthenticated")
+        await service.fetchUsage()
+
+        XCTAssertNotNil(
+            store.load(defaultScopes: UsageService.defaultOAuthScopes),
+            "A local mock's 401 must not delete real credentials"
+        )
+        XCTAssertTrue(service.isAuthenticated)
+    }
+
+    /// `extra_usage` survives the reconcile step — it is passed through by hand,
+    /// so an omission there would silently empty the popover's credits section.
+    func testExtraUsageSurvivesAFetch() async throws {
+        let usage = try await fetchUsage(scenario: "fable_mixed")
+
+        XCTAssertEqual(usage.extraUsage?.isEnabled, true)
+        XCTAssertEqual(usage.extraUsage?.usedCreditsAmount, 52.30)
+        XCTAssertEqual(usage.extraUsage?.monthlyLimitAmount, 280.00)
     }
 
     // MARK: - Endpoint override
@@ -126,6 +160,49 @@ final class MockServerIntegrationTests: XCTestCase {
             ),
             url
         )
+    }
+
+    /// Pins the wiring, not just the helper: without an explicit `usageEndpoint`
+    /// the service must pick the mock up from the environment.
+    func testServiceResolvesItsEndpointFromTheEnvironment() async throws {
+        let server = try XCTUnwrap(self.server)
+        setenv(UsageService.usageEndpointOverrideKey, server.usageURL.absoluteString, 1)
+        addTeardownBlock { unsetenv(UsageService.usageEndpointOverrideKey) }
+
+        try await setScenario("model_scoped")
+        let (service, _) = try makeServiceAndStore(usingDefaultEndpoint: true)
+        await service.fetchUsage()
+
+        XCTAssertNil(service.lastError)
+        XCTAssertEqual(service.usage?.perModelWeekly.first?.displayName, "Fable 5")
+    }
+
+    func testOverrideRejectsNonHTTPSchemesAndNonLoopbackHosts() {
+        for raw in [
+            "file://localhost/etc/passwd",
+            "ftp://127.0.0.1/x",
+            "//127.0.0.1:8080/api/oauth/usage",
+            "http://0.0.0.0:8080/api/oauth/usage",
+            "http://localhost.evil.com/api/oauth/usage",
+            "http://localhost@evil.com/api/oauth/usage",
+            "",
+        ] {
+            XCTAssertEqual(
+                UsageService.resolvedUsageEndpoint(
+                    environment: [UsageService.usageEndpointOverrideKey: raw]
+                ).host,
+                "api.anthropic.com",
+                "Should have rejected \(raw)"
+            )
+        }
+    }
+
+    func testOverrideToleratesSurroundingWhitespace() {
+        let resolved = UsageService.resolvedUsageEndpoint(
+            environment: [UsageService.usageEndpointOverrideKey: "  http://127.0.0.1:8080/api/oauth/usage \n"]
+        )
+
+        XCTAssertEqual(resolved.absoluteString, "http://127.0.0.1:8080/api/oauth/usage")
     }
 
     func testNonLoopbackOverrideIsIgnored() {
@@ -152,8 +229,39 @@ final class MockServerIntegrationTests: XCTestCase {
     }
 
     private func makeService() throws -> UsageService {
-        let server = try XCTUnwrap(self.server)
+        try makeServiceAndStore().service
+    }
 
+    /// `usageEndpoint: nil` leaves the default in place so a test can prove the
+    /// environment override is what wires the service up.
+    private func makeServiceAndStore(
+        usingDefaultEndpoint: Bool = false
+    ) throws -> (service: UsageService, store: StoredCredentialsStore) {
+        let server = try XCTUnwrap(self.server)
+        let store = try makeStore()
+
+        let service: UsageService
+        if usingDefaultEndpoint {
+            service = UsageService(
+                session: URLSession(configuration: .ephemeral),
+                tokenEndpoint: server.tokenURL,
+                credentialsStore: store,
+                localProfileLoader: { nil }
+            )
+        } else {
+            service = UsageService(
+                session: URLSession(configuration: .ephemeral),
+                usageEndpoint: server.usageURL,
+                // Never let a test reach the real token endpoint.
+                tokenEndpoint: server.tokenURL,
+                credentialsStore: store,
+                localProfileLoader: { nil }
+            )
+        }
+        return (service, store)
+    }
+
+    private func makeStore() throws -> StoredCredentialsStore {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -168,13 +276,7 @@ final class MockServerIntegrationTests: XCTestCase {
                 scopes: UsageService.defaultOAuthScopes
             )
         )
-
-        return UsageService(
-            session: URLSession(configuration: .ephemeral),
-            usageEndpoint: server.usageURL,
-            credentialsStore: store,
-            localProfileLoader: { nil }
-        )
+        return store
     }
 }
 
@@ -187,6 +289,7 @@ private final class MockServer {
 
     var baseURL: URL { URL(string: "http://127.0.0.1:\(port)")! }
     var usageURL: URL { baseURL.appendingPathComponent("api/oauth/usage") }
+    var tokenURL: URL { baseURL.appendingPathComponent("v1/oauth/token") }
 
     private init(port: Int, process: Process) {
         self.port = port
@@ -217,7 +320,7 @@ private final class MockServer {
             throw XCTSkip("Could not launch python3: \(error.localizedDescription)")
         }
 
-        guard let port = readBoundPort(from: output, process: process) else {
+        guard let port = readBoundPort(from: output) else {
             process.terminate()
             throw XCTSkip("Mock server did not report a port")
         }
@@ -240,26 +343,54 @@ private final class MockServer {
 
     /// Blocks until the server prints its "running on http://127.0.0.1:<port>"
     /// banner, so tests never race the socket becoming ready.
-    private static func readBoundPort(from pipe: Pipe, process: Process) -> Int? {
-        let handle = pipe.fileHandleForReading
+    ///
+    /// Reads non-blocking: `availableData` would park until data or EOF, which
+    /// makes the deadline unenforceable and hangs the whole run if python starts
+    /// but never prints.
+    private static func readBoundPort(from pipe: Pipe) -> Int? {
+        let descriptor = pipe.fileHandleForReading.fileDescriptor
+        let flags = fcntl(descriptor, F_GETFL, 0)
+        guard flags != -1, fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) != -1 else {
+            return nil
+        }
+
         let deadline = Date().addingTimeInterval(30)
         var buffered = ""
+        var chunk = [UInt8](repeating: 0, count: 4096)
 
         while Date() < deadline {
-            guard process.isRunning || !buffered.isEmpty else { return nil }
+            let count = read(descriptor, &chunk, chunk.count)
 
-            let chunk = handle.availableData
-            guard !chunk.isEmpty else { continue }
-            buffered += String(decoding: chunk, as: UTF8.self)
-
-            for line in buffered.split(separator: "\n") {
-                guard line.contains("running on") else { continue }
-                guard let portText = line.split(separator: ":").last,
-                      let port = Int(portText.trimmingCharacters(in: .whitespaces)) else {
-                    continue
+            if count > 0 {
+                buffered += String(decoding: chunk[0..<count], as: UTF8.self)
+                if let port = parseBoundPort(from: buffered) {
+                    return port
                 }
-                return port
+            } else if count == 0 {
+                return nil // EOF — the process exited without printing a port.
+            } else if errno != EAGAIN && errno != EWOULDBLOCK {
+                return nil
+            } else {
+                Thread.sleep(forTimeInterval: 0.02)
             }
+        }
+
+        return nil
+    }
+
+    /// Only parses newline-terminated lines: a chunk boundary inside the port
+    /// number would otherwise yield a truncated but still-parseable value, and
+    /// every later request would go to the wrong port.
+    private static func parseBoundPort(from buffered: String) -> Int? {
+        guard let lastNewline = buffered.lastIndex(of: "\n") else { return nil }
+
+        for line in buffered[..<lastNewline].split(separator: "\n") {
+            guard line.contains("running on"),
+                  let portText = line.split(separator: ":").last,
+                  let port = Int(portText.trimmingCharacters(in: .whitespaces)) else {
+                continue
+            }
+            return port
         }
 
         return nil
