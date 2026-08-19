@@ -646,6 +646,26 @@ final class UsageServiceTests: XCTestCase {
         XCTAssertEqual(saved.refreshToken, "refresh-2")
     }
 
+    // MARK: - OAuth code submission
+
+    /// A whitespace-only paste passes the `code.isEmpty` button guard (which checks
+    /// the raw, untrimmed field) but trims to "" inside `submitOAuthCode`, so `split`
+    /// returns no parts. Indexing `parts[0]` used to crash; it must now surface an error.
+    func testSubmitOAuthCodeWithWhitespaceOnlyInputShowsErrorWithoutCrashing() async throws {
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: URL(string: "https://example.com/api/oauth/usage")!,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
+            credentialsStore: try makeStore()
+        )
+
+        await service.submitOAuthCode("   ")
+
+        XCTAssertEqual(service.lastError, "No OAuth code entered")
+        XCTAssertFalse(service.isAuthenticated)
+    }
+
     private func makeStore() throws -> StoredCredentialsStore {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

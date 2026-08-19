@@ -152,7 +152,12 @@ class UsageService: ObservableObject {
     func submitOAuthCode(_ rawCode: String) async {
         // Response format: "code#state" — parse it
         let parts = rawCode.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "#", maxSplits: 1)
-        let code = String(parts[0])
+        // A whitespace-only paste trims to "" and yields no parts, so guard before
+        // indexing. Leave isAwaitingCode set so the user can retry without restarting.
+        guard let code = parts.first.map(String.init), !code.isEmpty else {
+            lastError = "No OAuth code entered"
+            return
+        }
 
         if parts.count > 1 {
             let returnedState = String(parts[1])
