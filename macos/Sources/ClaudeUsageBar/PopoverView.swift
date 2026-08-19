@@ -74,16 +74,13 @@ struct PopoverView: View {
             bucket: service.usage?.sevenDay
         )
 
-        if let opus = service.usage?.sevenDayOpus,
-           opus.utilization != nil {
+        let perModel = service.usage?.perModelWeekly ?? []
+        if !perModel.isEmpty {
             Divider()
             Text("Per-Model (7 day)")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-            UsageBucketRow(label: "Opus", bucket: opus)
-            if let sonnet = service.usage?.sevenDaySonnet {
-                UsageBucketRow(label: "Sonnet", bucket: sonnet)
-            }
+            perModelRows(perModel)
         }
 
         if let extra = service.usage?.extraUsage, extra.isEnabled {
@@ -139,6 +136,33 @@ struct PopoverView: View {
                 .buttonStyle(.borderless)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    /// How many per-model rows render inline before the section starts scrolling.
+    private static let inlinePerModelRowLimit = 6
+    /// Approximate height of one `UsageBucketRow`, used only to size the scroller.
+    private static let perModelRowHeight: CGFloat = 52
+
+    /// The number of model-scoped windows the server reports is unbounded, and
+    /// the popover has a fixed width and no outer scroll view — so past a
+    /// handful of rows this section scrolls instead of pushing the chart and
+    /// the controls off-screen.
+    @ViewBuilder
+    private func perModelRows(_ entries: [PerModelUsage]) -> some View {
+        let rows = VStack(alignment: .leading, spacing: 8) {
+            ForEach(entries) { entry in
+                UsageBucketRow(label: entry.displayName, bucket: entry.bucket)
+            }
+        }
+
+        if entries.count > Self.inlinePerModelRowLimit {
+            ScrollView {
+                rows
+            }
+            .frame(height: CGFloat(Self.inlinePerModelRowLimit) * Self.perModelRowHeight)
+        } else {
+            rows
         }
     }
 
