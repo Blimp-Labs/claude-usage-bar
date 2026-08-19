@@ -119,10 +119,13 @@ final class UsageModelTests: XCTestCase {
         XCTAssertEqual(response.perModelWeekly.map(\.displayName), ["Fable 5", "Opus", "Sonnet"])
     }
 
-    func testPerModelWeeklyDoesNotDuplicateAModelCoveredByLimits() throws {
+    /// Deliberate tradeoff: only an exact model-name match suppresses the fixed
+    /// row. A differently-labelled entry might measure a different window, and
+    /// showing a redundant row is far better than hiding a real one.
+    func testDifferentlyNamedLimitDoesNotSuppressTheFixedRow() throws {
         let response = try decode("""
         {
-          "seven_day_opus": {"utilization": 71.0, "resets_at": null},
+          "seven_day_opus": {"utilization": 88.0, "resets_at": null},
           "limits": [
             {"kind": "weekly_scoped", "group": "subscription", "percent": 71.0,
              "resets_at": null, "scope": {"model": {"display_name": "Claude Opus 5"}}}
@@ -130,7 +133,8 @@ final class UsageModelTests: XCTestCase {
         }
         """)
 
-        XCTAssertEqual(response.perModelWeekly.map(\.displayName), ["Claude Opus 5"])
+        XCTAssertEqual(response.perModelWeekly.map(\.displayName), ["Claude Opus 5", "Opus"])
+        XCTAssertEqual(response.perModelWeekly.map(\.bucket.utilization), [71.0, 88.0])
     }
 
     func testPerModelWeeklyIsEmptyWhenNothingIsReported() throws {
@@ -332,6 +336,106 @@ final class UsageModelTests: XCTestCase {
         XCTAssertEqual(reconciled.extraUsage?.usedCredits, 5230)
         XCTAssertEqual(reconciled.extraUsage?.monthlyLimit, 28000)
         XCTAssertEqual(reconciled.extraUsage?.utilization, 18.68)
+    }
+
+    // MARK: - Resilience to `limits` drift
+
+    func testUnrecognisedLimitShapesDoNotBreakTheRestOfTheResponse() throws {
+        let response = try decode("""
+        {
+          "five_hour": {"utilization": 25.0, "resets_at": "2026-03-05T18:00:00Z"},
+          "seven_day": {"utilization": 45.0, "resets_at": "2026-03-10T00:00:00Z"},
+          "limits": [
+            {"kind": "weekly_scoped", "group": "subscription", "percent": "48.5",
+             "resets_at": null, "scope": {"model": {"display_name": "Fable 5"}}},
+            {"kind": "weekly_scoped", "group": "subscription", "percent": 12.0,
+             "resets_at": null, "scope": {"model": "Opus"}},
+            {"kind": "weekly_scoped", "group": "subscription", "percent": 33.0,
+             "resets_at": null, "scope": {"model": {"display_name": "Sonnet"}}}
+          ]
+        }
+        """)
+
+        // The good entry survives; the two malformed ones are dropped.
+        XCTAssertEqual(response.fiveHour?.utilization, 25.0)
+        XCTAssertEqual(response.sevenDay?.utilization, 45.0)
+        XCTAssertEqual(response.perModelWeekly.map(\.displayName), ["Sonnet"])
+    }
+
+    func testLimitsOfAnUnexpectedTypeDegradeToNoRows() throws {
+        let response = try decode("""
+        {
+          "five_hour": {"utilization": 25.0, "resets_at": null},
+          "limits": {"unexpected": "object"}
+        }
+        """)
+
+        XCTAssertEqual(response.fiveHour?.utilization, 25.0)
+        XCTAssertTrue(response.perModelWeekly.isEmpty)
+    }
+
+    // MARK: - Dedup against the fixed fields
+
+    func testNarrowerSurfaceScopedEntryDoesNotHideTheAccountWideRow() throws {
+        let response = try decode("""
+        {
+          "seven_day_opus": {"utilization": 88.0, "resets_at": null},
+          "limits": [
+            {"kind": "weekly_scoped", "group": "subscription", "percent": 5.0,
+             "resets_at": null,
+             "scope": {"model": {"display_name": "Opus"},
+                       "surface": {"display_name": "Cowork"}}}
+          ]
+        }
+        """)
+
+        let rows = response.perModelWeekly
+        XCTAssertEqual(rows.map(\.displayName), ["Opus (Cowork)", "Opus"])
+        XCTAssertEqual(rows.last?.bucket.utilization, 88.0)
+    }
+
+    func testUnsurfacedEntryForTheSameModelStillSupersedesTheFixedRow() throws {
+        let response = try decode("""
+        {
+          "seven_day_opus": {"utilization": 88.0, "resets_at": null},
+          "limits": [
+            {"kind": "weekly_scoped", "group": "subscription", "percent": 71.0,
+             "resets_at": null, "scope": {"model": {"display_name": "opus"}}}
+          ]
+        }
+        """)
+
+        XCTAssertEqual(response.perModelWeekly.map(\.bucket.utilization), [71.0])
+    }
+
+    func testTwoGroupsForOneModelGetDistinguishableLabels() throws {
+        let response = try decode("""
+        {
+          "limits": [
+            {"kind": "weekly_scoped", "group": "subscription", "percent": 100.0,
+             "resets_at": null, "scope": {"model": {"display_name": "Opus"}}},
+            {"kind": "weekly_scoped", "group": "overage", "percent": 3.0,
+             "resets_at": null, "scope": {"model": {"display_name": "Opus"}}}
+          ]
+        }
+        """)
+
+        let rows = response.perModelWeekly
+        XCTAssertEqual(rows.map(\.displayName), ["Opus — subscription", "Opus — overage"])
+        XCTAssertEqual(Set(rows.map(\.id)).count, 2)
+    }
+
+    func testASingleGroupNeedsNoLabelSuffix() throws {
+        let response = try decode("""
+        {
+          "limits": [
+            {"kind": "weekly_scoped", "group": "subscription", "percent": 48.5,
+             "resets_at": null, "scope": {"model": {"display_name": "Fable 5"}}}
+          ]
+        }
+        """)
+
+        XCTAssertEqual(response.perModelWeekly.map(\.displayName), ["Fable 5"])
     }
 
     private func decode(_ json: String) throws -> UsageResponse {

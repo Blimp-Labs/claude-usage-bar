@@ -79,21 +79,29 @@ A mock API server lets you test usage fetching and error handling against differ
 python3 scripts/mock-server.py --scenario extra
 ```
 
-To connect the app to the mock server:
+To connect the app to the mock server, set the endpoint override — no source
+edits needed:
 
-1. In `UsageService.swift`, change the endpoint:
-   ```swift
-   private let usageEndpoint = URL(string: "http://127.0.0.1:8080/api/oauth/usage")!
-   ```
-2. Add local networking to `Resources/Info.plist`:
-   ```xml
-   <key>NSAppTransportSecurity</key>
-   <dict>
-       <key>NSAllowsLocalNetworking</key>
-       <true/>
-   </dict>
-   ```
-3. Rebuild and run the app, then click Refresh.
+```sh
+CLAUDE_USAGE_BAR_USAGE_ENDPOINT=http://127.0.0.1:8080/api/oauth/usage \
+    macos/ClaudeUsageBar.app/Contents/MacOS/ClaudeUsageBar
+```
+
+Only `http(s)` loopback hosts are accepted; anything else is ignored and logged,
+because the request carries your OAuth bearer token. The app logs which endpoint
+it resolved on startup.
+
+If the app cannot reach the loopback server, App Transport Security may be
+blocking plain `http` from the bundle — add this to `Resources/Info.plist` and
+rebuild (revert before committing):
+
+```xml
+<key>NSAppTransportSecurity</key>
+<dict>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+</dict>
+```
 
 This only mocks `GET /api/oauth/usage`. The current app still uses Anthropic’s real OAuth/browser flow unless you separately rewire the auth endpoints.
 
@@ -107,13 +115,17 @@ Available scenarios:
 | `low` | Barely used (5h: 2%, 7d: 5%) |
 | `extra` | Extra usage enabled ($52.30 / $280.00) |
 | `extra_high` | Extra usage near limit ($94.50 / $100.00) |
-| `per_model` | Per-model breakdown (Opus + Sonnet) |
+| `per_model` | Per-model breakdown via the fixed `seven_day_*` fields (Opus + Sonnet) |
+| `model_scoped` | Per-model breakdown via `limits[]` (Fable 5 + Opus + Sonnet) |
+| `model_scoped_no_reset` | A `limits[]` entry with a null `resets_at` (exercises reconciliation) |
+| `fable_mixed` | Fable 5 via `limits[]`, Opus/Sonnet via the fixed fields |
 | `all_features` | Everything: per-model + extra usage |
 | `unauthenticated` | Returns 401 |
 | `rate_limited` | Returns 429 with Retry-After |
 | `error` | Returns 500 |
 
-**Remember to revert the endpoint and Info.plist changes before committing.**
+**The endpoint override is an environment variable, so there is nothing to revert
+— but do revert any Info.plist change before committing.**
 
 ## Submitting changes
 

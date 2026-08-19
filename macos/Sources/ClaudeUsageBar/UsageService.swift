@@ -306,10 +306,18 @@ class UsageService: ObservableObject {
             // A local mock returning 401 must not delete the user's real
             // credentials — the token endpoint is not overridable, so the
             // refresh-then-retry path would otherwise sign them out for real.
+            // (It does still refresh against the real token endpoint, which
+            // rotates the refresh token; harmless, but worth knowing.)
+            let isLocalMock = Self.isLoopback(usageEndpoint)
             guard let result = try await sendAuthorizedRequest(
                 to: usageEndpoint,
-                expireSessionOnAuthFailure: !Self.isLoopback(usageEndpoint)
+                expireSessionOnAuthFailure: !isLocalMock
             ) else {
+                // expireSession() normally reports this; skipping it must not
+                // leave stale numbers on screen with no indication why.
+                if isLocalMock, lastError == nil {
+                    lastError = "Local endpoint rejected the request — credentials left intact"
+                }
                 return
             }
             let (data, http) = result

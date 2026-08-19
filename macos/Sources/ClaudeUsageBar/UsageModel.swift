@@ -35,23 +35,69 @@ struct UsageResponse: Codable {
         self.limits = limits
     }
 
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        fiveHour = try container.decodeIfPresent(UsageBucket.self, forKey: .fiveHour)
+        sevenDay = try container.decodeIfPresent(UsageBucket.self, forKey: .sevenDay)
+        sevenDayOpus = try container.decodeIfPresent(UsageBucket.self, forKey: .sevenDayOpus)
+        sevenDaySonnet = try container.decodeIfPresent(UsageBucket.self, forKey: .sevenDaySonnet)
+        extraUsage = try container.decodeIfPresent(ExtraUsage.self, forKey: .extraUsage)
+
+        // `limits` is server-controlled and not part of any documented contract,
+        // so it is decoded element-wise and anything unrecognised is dropped.
+        // Strict decoding here would fail the whole response and freeze the
+        // 5-hour and 7-day bars over a field the app didn't read before.
+        limits = (try? container.decodeIfPresent([LenientLimit].self, forKey: .limits))?
+            .compactMap(\.value)
+    }
+
     /// Per-model weekly windows, newest source first: entries from `limits`
     /// win, and the fixed `seven_day_*` fields fill in models they don't cover.
     var perModelWeekly: [PerModelUsage] {
-        var result = (limits ?? []).compactMap(\.perModelWeekly)
+        let weekly = (limits ?? []).filter(\.isWeeklyScoped)
+        var result = weekly.compactMap(\.perModelWeekly)
+
+        // Only an entry for exactly this model, scoped to no particular surface,
+        // supersedes the fixed field. A narrower window measures something else
+        // — suppressing the account-wide bar in its favour would misreport usage
+        // (Claude Code shows both rather than reconciling them).
+        let superseded = Set(
+            weekly
+                .filter { ($0.scope?.surface?.displayName?.isEmpty ?? true) }
+                .compactMap { $0.scope?.model?.displayName?.lowercased() }
+        )
 
         func appendFixedField(id: String, displayName: String, bucket: UsageBucket?) {
             guard let bucket, bucket.utilization != nil else { return }
-            let alreadyCovered = result.contains {
-                $0.displayName.localizedCaseInsensitiveContains(displayName)
-            }
-            guard !alreadyCovered else { return }
+            guard !superseded.contains(displayName.lowercased()) else { return }
             result.append(PerModelUsage(id: id, displayName: displayName, bucket: bucket))
         }
 
         appendFixedField(id: "seven_day_opus", displayName: "Opus", bucket: sevenDayOpus)
         appendFixedField(id: "seven_day_sonnet", displayName: "Sonnet", bucket: sevenDaySonnet)
-        return result
+        return Self.disambiguating(result)
+    }
+
+    /// `id` separates rows by group, so the label has to as well — otherwise two
+    /// windows for one model render as identical rows with different numbers.
+    private static func disambiguating(_ rows: [PerModelUsage]) -> [PerModelUsage] {
+        let duplicated = Set(
+            Dictionary(grouping: rows, by: \.displayName)
+                .filter { $0.value.count > 1 }
+                .keys
+        )
+        guard !duplicated.isEmpty else { return rows }
+
+        return rows.map { row in
+            guard duplicated.contains(row.displayName),
+                  let group = row.group, !group.isEmpty else { return row }
+            return PerModelUsage(
+                id: row.id,
+                displayName: "\(row.displayName) — \(group)",
+                bucket: row.bucket,
+                group: group
+            )
+        }
     }
 
     func reconciled(with previous: UsageResponse?, now: Date = Date()) -> UsageResponse {
@@ -89,6 +135,15 @@ struct UsageResponse: Codable {
     }
 }
 
+/// Decodes a `UsageLimit` without failing the surrounding array.
+private struct LenientLimit: Decodable {
+    let value: UsageLimit?
+
+    init(from decoder: Decoder) throws {
+        value = try? UsageLimit(from: decoder)
+    }
+}
+
 /// One per-model row in the popover's per-model section.
 struct PerModelUsage: Identifiable {
     /// Derived from the full scope, not just the model name: two weekly windows
@@ -97,6 +152,15 @@ struct PerModelUsage: Identifiable {
     let id: String
     let displayName: String
     let bucket: UsageBucket
+    /// Only used to disambiguate otherwise-identical labels.
+    let group: String?
+
+    init(id: String, displayName: String, bucket: UsageBucket, group: String? = nil) {
+        self.id = id
+        self.displayName = displayName
+        self.bucket = bucket
+        self.group = group
+    }
 }
 
 struct UsageLimit: Codable {
@@ -160,7 +224,8 @@ struct UsageLimit: Codable {
                 .map { $0 ?? "" }
                 .joined(separator: "\u{1F}"),
             displayName: surface.map { "\(model) (\($0))" } ?? model,
-            bucket: UsageBucket(utilization: percent, resetsAt: resetsAt)
+            bucket: UsageBucket(utilization: percent, resetsAt: resetsAt),
+            group: group
         )
     }
 
