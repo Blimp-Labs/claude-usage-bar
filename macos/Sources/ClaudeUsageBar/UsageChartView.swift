@@ -110,7 +110,8 @@ struct UsageChartView: View {
                     .onContinuousHover { phase in
                         switch phase {
                         case .active(let location):
-                            let plotOrigin = geo[proxy.plotFrame!].origin
+                            guard let plotFrame = proxy.plotFrame else { return }
+                            let plotOrigin = geo[plotFrame].origin
                             let x = location.x - plotOrigin.x
                             if let date: Date = proxy.value(atX: x) {
                                 hoverDate = date
