@@ -28,7 +28,7 @@ final class MockServerIntegrationTests: XCTestCase {
 
         XCTAssertEqual(
             usage.perModelWeekly.map(\.displayName),
-            ["Fable 5", "Opus", "Sonnet"]
+            ["Fable", "Opus", "Sonnet"]
         )
         XCTAssertEqual(usage.perModelWeekly.first?.bucket.utilization, 48.5)
     }
@@ -40,7 +40,7 @@ final class MockServerIntegrationTests: XCTestCase {
         // fields — the popover should show all three exactly once.
         XCTAssertEqual(
             usage.perModelWeekly.map(\.displayName),
-            ["Fable 5", "Opus", "Sonnet"]
+            ["Fable", "Opus", "Sonnet"]
         )
         XCTAssertEqual(usage.perModelWeekly.first?.bucket.utilization, 48.5)
         XCTAssertNotNil(usage.perModelWeekly.first?.bucket.resetsAtDate)
@@ -89,7 +89,7 @@ final class MockServerIntegrationTests: XCTestCase {
         await service.fetchUsage()
         XCTAssertEqual(
             service.usage?.perModelWeekly.map(\.displayName),
-            ["Fable 5", "Opus", "Sonnet"]
+            ["Fable", "Opus", "Sonnet"]
         )
         XCTAssertEqual(
             service.usage?.perModelWeekly.map { $0.bucket.utilization },
@@ -109,7 +109,7 @@ final class MockServerIntegrationTests: XCTestCase {
         try await setScenario("model_scoped_no_reset")
         await service.fetchUsage()
 
-        XCTAssertEqual(service.usage?.perModelWeekly.first?.displayName, "Fable 5")
+        XCTAssertEqual(service.usage?.perModelWeekly.first?.displayName, "Fable")
         // The reset carries over, but the percentage must still be the new one.
         XCTAssertEqual(service.usage?.perModelWeekly.first?.bucket.utilization, 52.0)
         // Carrying a reset forward re-serialises it without fractional seconds,
@@ -174,7 +174,7 @@ final class MockServerIntegrationTests: XCTestCase {
         await service.fetchUsage()
 
         XCTAssertNil(service.lastError)
-        XCTAssertEqual(service.usage?.perModelWeekly.first?.displayName, "Fable 5")
+        XCTAssertEqual(service.usage?.perModelWeekly.first?.displayName, "Fable")
     }
 
     func testOverrideRejectsNonHTTPSchemesAndNonLoopbackHosts() {

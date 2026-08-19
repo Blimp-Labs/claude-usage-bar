@@ -44,14 +44,33 @@ def iso_future(hours=0, days=0):
 
 
 def weekly_scoped(display_name, percent, days=5, resets=True):
-    """A model-scoped weekly window, as returned in the `limits` array."""
+    """A model-scoped weekly window, matching a payload captured from the real
+    endpoint on 2026-08-19 (note group is "weekly", not "subscription")."""
     return {
         "kind": "weekly_scoped",
-        "group": "subscription",
+        "group": "weekly",
         "percent": percent,
+        "severity": "normal",
         "resets_at": iso_future(days=days) if resets else None,
-        "scope": {"model": {"display_name": display_name}},
+        "scope": {"model": {"id": None, "display_name": display_name}, "surface": None},
+        "is_active": True,
     }
+
+
+def unscoped_limits(five_hour_pct, seven_day_pct):
+    """The two unscoped entries the real endpoint always sends alongside."""
+    return [
+        {
+            "kind": "session", "group": "session", "percent": five_hour_pct,
+            "severity": "normal", "resets_at": iso_future(hours=3),
+            "scope": None, "is_active": False,
+        },
+        {
+            "kind": "weekly_all", "group": "weekly", "percent": seven_day_pct,
+            "severity": "normal", "resets_at": iso_future(days=4),
+            "scope": None, "is_active": False,
+        },
+    ]
 
 
 SCENARIOS = {
@@ -166,8 +185,8 @@ SCENARIOS = {
         "seven_day_opus": None,
         "seven_day_sonnet": None,
         "seven_day_oauth_apps": None,
-        "limits": [
-            weekly_scoped("Fable 5", 48.5),
+        "limits": unscoped_limits(35.0, 55.0) + [
+            weekly_scoped("Fable", 48.5),
             weekly_scoped("Opus", 70.0),
             weekly_scoped("Sonnet", 15.0),
         ],
@@ -184,7 +203,7 @@ SCENARIOS = {
         "seven_day_opus": None,
         "seven_day_sonnet": None,
         "seven_day_oauth_apps": None,
-        "limits": [weekly_scoped("Fable 5", 52.0, resets=False)],
+        "limits": [weekly_scoped("Fable", 52.0, resets=False)],
         "extra_usage": {
             "is_enabled": False,
             "monthly_limit": None,
@@ -198,7 +217,7 @@ SCENARIOS = {
         "seven_day_opus": {"utilization": 70.0, "resets_at": iso_future(days=5)},
         "seven_day_sonnet": {"utilization": 15.0, "resets_at": iso_future(days=5)},
         "seven_day_oauth_apps": None,
-        "limits": [weekly_scoped("Fable 5", 48.5)],
+        "limits": [weekly_scoped("Fable", 48.5)],
         "extra_usage": {
             "is_enabled": True,
             "monthly_limit": 28000,
@@ -215,7 +234,7 @@ SCENARIOS = {
         "seven_day_cowork": None,
         "iguana_necktie": None,
         "limits": [
-            weekly_scoped("Fable 5", 64.0, days=4),
+            weekly_scoped("Fable", 64.0, days=4),
             weekly_scoped("Opus", 88.0, days=4),
             weekly_scoped("Sonnet", 25.0, days=4),
         ],

@@ -438,6 +438,67 @@ final class UsageModelTests: XCTestCase {
         XCTAssertEqual(response.perModelWeekly.map(\.displayName), ["Fable 5"])
     }
 
+    // MARK: - Real captured payload
+
+    /// Captured verbatim from `GET /api/oauth/usage` on a live account
+    /// (2026-08-19). Pins the shape the server actually sends, including the
+    /// fields the app ignores and the `kind`/`group` values it must tolerate.
+    func testRealCapturedPayloadYieldsTheFableRow() throws {
+        let response = try decode("""
+        {
+          "five_hour": {"utilization": 33.0, "resets_at": "2026-08-19T12:40:00.053135+00:00",
+                        "limit_dollars": null, "used_dollars": null, "remaining_dollars": null},
+          "seven_day": {"utilization": 33.0, "resets_at": "2026-08-22T03:00:00.053154+00:00",
+                        "limit_dollars": null, "used_dollars": null, "remaining_dollars": null},
+          "seven_day_oauth_apps": null, "seven_day_opus": null, "seven_day_sonnet": null,
+          "seven_day_cowork": null, "seven_day_omelette": null, "tangelo": null,
+          "iguana_necktie": null, "omelette_promotional": null,
+          "nimbus_quill": {"utilization": 0.0, "resets_at": null},
+          "cinder_cove": null, "amber_ladder": null,
+          "extra_usage": {"is_enabled": false, "monthly_limit": 5000, "used_credits": 0.0,
+                          "utilization": 0.0, "currency": "USD", "decimal_places": 2,
+                          "disabled_reason": "out_of_credits", "user_disabled": false,
+                          "spend_limit_reached": false, "credits_ever_enabled": true,
+                          "daily": null, "weekly": null},
+          "limits": [
+            {"kind": "session", "group": "session", "percent": 33, "severity": "normal",
+             "resets_at": "2026-08-19T12:40:00.053135+00:00", "scope": null, "is_active": false},
+            {"kind": "weekly_all", "group": "weekly", "percent": 33, "severity": "normal",
+             "resets_at": "2026-08-22T03:00:00.053154+00:00", "scope": null, "is_active": false},
+            {"kind": "weekly_scoped", "group": "weekly", "percent": 42, "severity": "normal",
+             "resets_at": "2026-08-22T03:00:00.053375+00:00",
+             "scope": {"model": {"id": null, "display_name": "Fable"}, "surface": null},
+             "is_active": true}
+          ],
+          "spend": {"percent": 0, "severity": "normal", "enabled": false},
+          "member_dashboard_available": false
+        }
+        """)
+
+        // The top-level bars are unaffected by everything new.
+        XCTAssertEqual(response.fiveHour?.utilization, 33.0)
+        XCTAssertEqual(response.sevenDay?.utilization, 33.0)
+
+        // Exactly one per-model row: the session and weekly_all entries have no
+        // model scope, and both fixed seven_day_* fields are null.
+        XCTAssertEqual(response.perModelWeekly.map(\.displayName), ["Fable"])
+        XCTAssertEqual(response.perModelWeekly.first?.bucket.utilization, 42.0)
+        XCTAssertNotNil(response.perModelWeekly.first?.bucket.resetsAtDate)
+    }
+
+    /// The real payload's group is "weekly", not "subscription" — a group
+    /// allowlist would have hidden the only row the feature exists to show.
+    func testRealPayloadGroupIsNotSubscription() throws {
+        let response = try decode("""
+        {"limits": [{"kind": "weekly_scoped", "group": "weekly", "percent": 42,
+                     "resets_at": null,
+                     "scope": {"model": {"id": null, "display_name": "Fable"}, "surface": null}}]}
+        """)
+
+        XCTAssertEqual(response.limits?.first?.group, "weekly")
+        XCTAssertEqual(response.perModelWeekly.map(\.displayName), ["Fable"])
+    }
+
     private func decode(_ json: String) throws -> UsageResponse {
         try JSONDecoder().decode(UsageResponse.self, from: Data(json.utf8))
     }
