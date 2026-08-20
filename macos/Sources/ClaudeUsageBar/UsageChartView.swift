@@ -130,26 +130,10 @@ struct UsageChartView: View {
         .chartPlotStyle { plot in
             plot.clipped()
         }
-        .chartOverlay { proxy in
-            GeometryReader { geo in
-                Rectangle()
-                    .fill(.clear)
-                    .contentShape(Rectangle())
-                    .onContinuousHover { phase in
-                        switch phase {
-                        case .active(let location):
-                            guard let plotFrame = proxy.plotFrame else { return }
-                            let plotOrigin = geo[plotFrame].origin
-                            let x = location.x - plotOrigin.x
-                            if let date: Date = proxy.value(atX: x) {
-                                hoverDate = date
-                            }
-                        case .ended:
-                            hoverDate = nil
-                        }
-                    }
-            }
-        }
+        // Swift Charts maps the pointer onto the x scale itself and clears the
+        // binding on exit — no plot-area coordinate math, and no `plotFrame`
+        // to force-unwrap before the first layout pass.
+        .chartXSelection(value: $hoverDate)
         .overlay(alignment: .top) {
             if let iv = interpolated {
                 tooltipView(date: iv.date, pct5h: iv.pct5h, pct7d: iv.pct7d)
