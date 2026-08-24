@@ -368,6 +368,7 @@ class UsageService: ObservableObject {
             }
             let (data, http) = result
             if http.statusCode == 429 {
+                _ = await refreshCredentials(force: true)  // fresh token = fresh rate-limit window
                 let retryAfter = http.value(forHTTPHeaderField: "Retry-After")
                     .flatMap(Double.init) ?? currentInterval
                 currentInterval = Self.backoffInterval(
