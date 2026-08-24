@@ -473,7 +473,10 @@ class UsageService: ObservableObject {
             return nil
         }
 
-        if initialCredentials.needsRefresh() {
+        // Leeway scales with the polling interval: a fixed 5-minute buffer isn't enough if
+        // the next poll is further away than that, since the token could expire in between.
+        let proactiveLeeway = currentInterval + 300
+        if initialCredentials.needsRefresh(leeway: proactiveLeeway) {
             let refreshResult = await refreshCredentials(force: true)
             if refreshResult != .success, initialCredentials.isExpired() {
                 switch refreshResult {
