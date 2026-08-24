@@ -1,6 +1,12 @@
 import SwiftUI
 import os
 
+private let relativeDateFormatter: RelativeDateTimeFormatter = {
+    let f = RelativeDateTimeFormatter()
+    f.unitsStyle = .full
+    return f
+}()
+
 struct PopoverView: View {
     private static let resizeLogger = Logger(subsystem: "com.local.ClaudeUsageBar", category: "PopoverResize")
     @ObservedObject var service: UsageService
@@ -14,6 +20,11 @@ struct PopoverView: View {
     @AppStorage(AppearanceDefaultsKey.showForecast) private var showForecast = true
     @AppStorage(AppearanceDefaultsKey.showRunOutProjection) private var showRunOutProjection = false
     @State private var hostingWindow: NSWindow?
+    // `Text(date, style: .relative)` hooks into a display-link and re-renders continuously
+    // even while the popover is closed (~4% constant idle CPU). Snapshot `now` once and only
+    // refresh it on a 60s timer that runs while the popover content is on screen.
+    @State private var now = Date()
+    @State private var minuteTimer: Timer?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -47,6 +58,16 @@ struct PopoverView: View {
         )
         .onReceive(Timer.publish(every: 0.15, on: .main, in: .common).autoconnect()) { _ in
             reconcileSize()
+        }
+        .onAppear {
+            now = Date()
+            minuteTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in
+                now = Date()
+            }
+        }
+        .onDisappear {
+            minuteTimer?.invalidate()
+            minuteTimer = nil
         }
     }
 
@@ -119,14 +140,16 @@ struct PopoverView: View {
             label: "5-Hour Window",
             bucket: service.usage?.fiveHour,
             forecastPct: showForecast ? service.forecast.map { $0.projected5h / 100.0 } : nil,
-            windowSeconds: 5 * 3600
+            windowSeconds: 5 * 3600,
+            now: now
         )
 
         UsageBucketRow(
             label: "7-Day Window",
             bucket: service.usage?.sevenDay,
             forecastPct: showForecast ? service.forecast.map { $0.projected7d / 100.0 } : nil,
-            windowSeconds: 7 * 24 * 3600
+            windowSeconds: 7 * 24 * 3600,
+            now: now
         )
 
         if let opus = service.usage?.sevenDayOpus,
@@ -137,9 +160,9 @@ struct PopoverView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 2)
-                UsageBucketRow(label: "Opus", bucket: opus, windowSeconds: 7 * 24 * 3600)
+                UsageBucketRow(label: "Opus", bucket: opus, windowSeconds: 7 * 24 * 3600, now: now)
                 if let sonnet = service.usage?.sevenDaySonnet {
-                    UsageBucketRow(label: "Sonnet", bucket: sonnet, windowSeconds: 7 * 24 * 3600)
+                    UsageBucketRow(label: "Sonnet", bucket: sonnet, windowSeconds: 7 * 24 * 3600, now: now)
                 }
             }
         }
@@ -176,7 +199,7 @@ struct PopoverView: View {
     private var footerView: some View {
         VStack(alignment: .leading, spacing: 4) {
             if let updated = service.lastUpdated {
-                Text("Updated \(updated, style: .relative) ago")
+                Text("Updated \(relativeDateFormatter.localizedString(for: updated, relativeTo: now))")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -454,6 +477,7 @@ private struct UsageBucketRow: View {
     let bucket: UsageBucket?
     var forecastPct: Double? = nil
     var windowSeconds: TimeInterval? = nil
+    let now: Date
 
     @AppStorage(AppearanceDefaultsKey.showResetDivider) private var showResetDivider = false
     @AppStorage(AppearanceDefaultsKey.coloredResetDivider) private var coloredResetDivider = true
@@ -476,7 +500,7 @@ private struct UsageBucketRow: View {
                 resetDivider: resetDividerInfo
             )
             if let resetDate = bucket?.resetsAtDate {
-                Text("Resets \(resetDate, style: .relative)")
+                Text(formatResetCountdown(from: resetDate, now: now))
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
