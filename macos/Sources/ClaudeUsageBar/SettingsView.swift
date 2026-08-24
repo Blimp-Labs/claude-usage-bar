@@ -64,7 +64,9 @@ struct SettingsWindowContent: View {
                     // anything ever happens.
                     if let checked = appUpdater.lastCheckDate {
                         LabeledContent("Last checked") {
-                            Text(checked, style: .relative)
+                            // .relative renders a bare duration, so without this
+                            // it reads as a countdown rather than a past time.
+                            Text("\(checked, style: .relative) ago")
                                 .foregroundStyle(.secondary)
                         }
                     }

@@ -94,4 +94,32 @@ final class AppUpdaterTests: XCTestCase {
 
         XCTAssertEqual(AppUpdater.describe(error), "Not Sparkle's error")
     }
+
+    /// Sparkle puts the actionable half of the disk-image errors in the
+    /// recovery suggestion; showing only the description tells a user their
+    /// location is wrong but not what to do about it.
+    func testRecoverySuggestionIsAppendedWhenPresent() {
+        let error = NSError(
+            domain: SUSparkleErrorDomain,
+            code: Int(SUError.runningFromDiskImageError.rawValue),
+            userInfo: [
+                NSLocalizedDescriptionKey: "ClaudeUsageBar can't be updated because it was opened from a read-only or a temporary location.",
+                NSLocalizedRecoverySuggestionErrorKey: "Use Finder to copy ClaudeUsageBar to the Applications folder, relaunch it from there, and try again."
+            ]
+        )
+
+        let described = AppUpdater.describe(error)
+        XCTAssertTrue(described?.contains("read-only") ?? false)
+        XCTAssertTrue(described?.contains("Applications folder") ?? false)
+    }
+
+    func testDescriptionAloneIsUsedWhenThereIsNoRecoverySuggestion() {
+        let error = NSError(
+            domain: SUSparkleErrorDomain,
+            code: Int(SUError.appcastError.rawValue),
+            userInfo: [NSLocalizedDescriptionKey: "Update feed is unreachable"]
+        )
+
+        XCTAssertEqual(AppUpdater.describe(error), "Update feed is unreachable")
+    }
 }

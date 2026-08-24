@@ -102,6 +102,11 @@ final class AppUpdater: ObservableObject {
         // Not re-read afterwards: startUpdater() does not touch this property,
         // and assigning again would only re-enter didSet.
         updaterController.startUpdater()
+
+        // Sparkle persists this across launches. Without seeding it, the row
+        // stays hidden until the first in-process cycle — up to a full interval
+        // away — and its absence reads as "never checked".
+        lastCheckDate = updaterController.updater.lastUpdateCheckDate
     }
 
     func checkForUpdates() {
@@ -147,6 +152,15 @@ final class AppUpdater: ObservableObject {
         }
 
         let trimmed = carried.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "Update check failed" : trimmed
+        guard !trimmed.isEmpty else { return "Update check failed" }
+
+        // For the errors a DMG user actually hits — running from the mounted
+        // image, or translocated — the description names the problem and the
+        // recovery suggestion is the half that says what to do about it.
+        let recovery = (nsError.userInfo[NSLocalizedRecoverySuggestionErrorKey] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let recovery, !recovery.isEmpty else { return trimmed }
+
+        return "\(trimmed) \(recovery)"
     }
 }
