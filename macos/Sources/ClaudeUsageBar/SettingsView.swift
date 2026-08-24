@@ -52,18 +52,26 @@ struct SettingsWindowContent: View {
             }
 
             Section("Updates") {
-                LabeledContent("Version", value: Self.appVersion)
+                LabeledContent("Version") {
+                    Text(Self.appVersion)
+                        .textSelection(.enabled)
+                }
 
-                // Sparkle checks automatically once a day; this is the manual
-                // escape hatch, which is rare enough not to earn a slot in the
-                // popover footer. Only release builds configure a feed.
                 if appUpdater.isConfigured {
+                    Toggle("Check automatically", isOn: $appUpdater.automaticallyChecksForUpdates)
+
                     Button("Check for Updates…") {
                         appUpdater.checkForUpdates()
                     }
                     .disabled(!appUpdater.canCheckForUpdates)
+
+                    if let error = appUpdater.lastError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
                 } else {
-                    Text("Automatic updates are not configured for this build.")
+                    Text("This build has no update feed, so it cannot check for updates.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -80,12 +88,16 @@ struct SettingsWindowContent: View {
 
 extension SettingsWindowContent {
     static var appVersion: String {
-        let info = Bundle.main.infoDictionary
-        let short = info?["CFBundleShortVersionString"] as? String ?? "unknown"
-        if let build = info?["CFBundleVersion"] as? String, build != short, !build.isEmpty {
-            return "\(short) (\(build))"
-        }
-        return short
+        displayVersion(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
+    }
+
+    /// `CFBundleVersion` is derived from the version string by build.sh
+    /// (0.0.10 -> 10), so appending it would only restate the number beside it.
+    /// The marketing version stands alone.
+    static func displayVersion(_ shortVersion: String?) -> String {
+        let trimmed = shortVersion?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmed, !trimmed.isEmpty else { return "unknown" }
+        return trimmed
     }
 }
 
