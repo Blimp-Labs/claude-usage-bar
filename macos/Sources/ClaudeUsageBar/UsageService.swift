@@ -95,7 +95,9 @@ class UsageService: ObservableObject {
     var reset7d: Date? { usage?.sevenDay?.resetsAtDate }
 
     init(
-        session: URLSession = .shared,
+        // .shared allocates a persistent HTTP/disk cache that's never useful for authenticated
+        // API responses that shouldn't be cached — .ephemeral avoids that overhead entirely.
+        session: URLSession = URLSession(configuration: .ephemeral),
         usageEndpoint: URL = UsageService.defaultUsageEndpoint,
         userinfoEndpoint: URL = UsageService.defaultUserinfoEndpoint,
         tokenEndpoint: URL = UsageService.defaultTokenEndpoint,
