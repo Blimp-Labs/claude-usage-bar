@@ -60,17 +60,6 @@ struct SettingsWindowContent: View {
                 if appUpdater.isConfigured {
                     Toggle("Check daily for updates", isOn: $appUpdater.automaticallyChecksForUpdates)
 
-                    // Otherwise switching the toggle on gives no evidence that
-                    // anything ever happens.
-                    if let checked = appUpdater.lastCheckDate {
-                        LabeledContent("Last checked") {
-                            // .relative renders a bare duration, so without this
-                            // it reads as a countdown rather than a past time.
-                            Text("\(checked, style: .relative) ago")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
                     Button("Check for Updates…") {
                         appUpdater.checkForUpdates()
                     }

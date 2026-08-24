@@ -41,10 +41,6 @@ final class AppUpdater: ObservableObject {
         }
     }
 
-    /// When Sparkle last completed a check, so the section can say whether the
-    /// automatic checks it advertises are actually happening.
-    @Published private(set) var lastCheckDate: Date?
-
     private let updaterController: SPUStandardUpdaterController
     private let delegate: UpdaterDelegate
     private var canCheckObservation: NSKeyValueObservation?
@@ -102,11 +98,6 @@ final class AppUpdater: ObservableObject {
         // Not re-read afterwards: startUpdater() does not touch this property,
         // and assigning again would only re-enter didSet.
         updaterController.startUpdater()
-
-        // Sparkle persists this across launches. Without seeding it, the row
-        // stays hidden until the first in-process cycle — up to a full interval
-        // away — and its absence reads as "never checked".
-        lastCheckDate = updaterController.updater.lastUpdateCheckDate
     }
 
     func checkForUpdates() {
@@ -122,7 +113,6 @@ final class AppUpdater: ObservableObject {
     /// is pure and tested.
     func recordUpdateCycleResult(_ error: Error?) {
         lastError = Self.describe(error)
-        lastCheckDate = updaterController.updater.lastUpdateCheckDate
     }
 
     /// The outcomes Sparkle itself declines to log or surface. "No update
