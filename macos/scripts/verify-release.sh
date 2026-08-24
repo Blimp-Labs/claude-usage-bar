@@ -39,12 +39,57 @@ verify_app_bundle() {
     echo "==> Verifying app signature..."
     codesign -v "$app_bundle"
 
+    verify_build_target "$app_bundle/Contents/MacOS/$APP_NAME"
+
     echo "==> Verifying updater metadata..."
     plutil -extract SUPublicEDKey raw "$app_plist" >/dev/null
 
     if [[ "${EXPECT_FEED_URL:-0}" == "1" ]]; then
         plutil -extract SUFeedURL raw "$app_plist" >/dev/null
     fi
+}
+
+verify_build_target() {
+    local binary="$1"
+    local min_sdk_major="${MIN_SDK_MAJOR:-26}"
+    local expected_minos="${EXPECTED_MINOS:-14.0}"
+
+    echo "==> Verifying build target..."
+
+    command -v vtool >/dev/null 2>&1 || { echo "Error: vtool not found (needs Xcode command line tools)"; exit 1; }
+
+    local build_info sdks minoses
+    build_info="$(vtool -show-build "$binary")"
+    sdks="$(awk '$1 == "sdk" { print $2 }' <<< "$build_info")"
+    minoses="$(awk '$1 == "minos" { print $2 }' <<< "$build_info")"
+
+    [[ -n "$sdks" && -n "$minoses" ]] || { echo "Error: could not read LC_BUILD_VERSION from $binary"; exit 1; }
+
+    # macOS 26 grants an app the current appearance only if it was linked
+    # against the macOS 26 SDK or newer — there is an Info.plist key to opt out
+    # but none to opt in. An older SDK silently falls back to legacy chrome
+    # (square popover corners), with no build error to catch it.
+    local sdk
+    while read -r sdk; do
+        if [[ "${sdk%%.*}" -lt "$min_sdk_major" ]]; then
+            echo "Error: linked against SDK $sdk, need $min_sdk_major or newer."
+            echo "       The runner image is probably too old — check 'runs-on' in .github/workflows/."
+            exit 1
+        fi
+    done <<< "$sdks"
+
+    # The other direction: a newer toolchain must not silently raise the
+    # deployment target and strand users on older macOS.
+    local minos
+    while read -r minos; do
+        if [[ "$minos" != "$expected_minos" ]]; then
+            echo "Error: deployment target is $minos, expected $expected_minos."
+            echo "       Check .macOS(.v14) in Package.swift and LSMinimumSystemVersion in Info.plist."
+            exit 1
+        fi
+    done <<< "$minoses"
+
+    echo "    sdk $(head -n 1 <<< "$sdks") | minos $(head -n 1 <<< "$minoses")"
 }
 
 verify_applications_shortcut() {
