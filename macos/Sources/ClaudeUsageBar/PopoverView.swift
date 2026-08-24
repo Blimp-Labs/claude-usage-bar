@@ -124,14 +124,6 @@ struct PopoverView: View {
             }
             .buttonStyle(.borderless)
             .font(.caption)
-            if appUpdater.isConfigured {
-                Button("Check for Updates…") {
-                    appUpdater.checkForUpdates()
-                }
-                .buttonStyle(.borderless)
-                .font(.caption)
-                .disabled(!appUpdater.canCheckForUpdates)
-            }
             Button("Quit") { NSApplication.shared.terminate(nil) }
                 .buttonStyle(.borderless)
                 .font(.caption)
