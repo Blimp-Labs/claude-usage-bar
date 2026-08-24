@@ -4,6 +4,7 @@ import ServiceManagement
 struct SettingsWindowContent: View {
     @ObservedObject var service: UsageService
     @ObservedObject var notificationService: NotificationService
+    @ObservedObject var appUpdater: AppUpdater
 
     var body: some View {
         Form {
@@ -49,6 +50,24 @@ struct SettingsWindowContent: View {
                     }
                 }
             }
+
+            Section("Updates") {
+                LabeledContent("Version", value: Self.appVersion)
+
+                // Sparkle checks automatically once a day; this is the manual
+                // escape hatch, which is rare enough not to earn a slot in the
+                // popover footer. Only release builds configure a feed.
+                if appUpdater.isConfigured {
+                    Button("Check for Updates…") {
+                        appUpdater.checkForUpdates()
+                    }
+                    .disabled(!appUpdater.canCheckForUpdates)
+                } else {
+                    Text("Automatic updates are not configured for this build.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
         .formStyle(.grouped)
         .frame(width: 400)
@@ -56,6 +75,17 @@ struct SettingsWindowContent: View {
         .onAppear {
             focusSettingsWindow()
         }
+    }
+}
+
+extension SettingsWindowContent {
+    static var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "unknown"
+        if let build = info?["CFBundleVersion"] as? String, build != short, !build.isEmpty {
+            return "\(short) (\(build))"
+        }
+        return short
     }
 }
 
