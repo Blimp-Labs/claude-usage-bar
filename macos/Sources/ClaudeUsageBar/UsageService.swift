@@ -2,7 +2,6 @@ import Foundation
 import Combine
 import CryptoKit
 import AppKit
-
 @MainActor
 class UsageService: ObservableObject {
     @Published var usage: UsageResponse?
@@ -24,7 +23,13 @@ class UsageService: ObservableObject {
     private let localProfileLoader: @MainActor () -> String?
     private let urlOpener: @MainActor (URL) -> Bool
     private var currentInterval: TimeInterval
-    private var refreshTask: Task<Bool, Never>?
+    private enum RefreshResult {
+        case success
+        case permanentFailure
+        case transientFailure
+    }
+
+    private var refreshTask: Task<RefreshResult, Never>?
 
     static let defaultPollingMinutes = 30
     static let pollingOptions = [5, 15, 30, 60]
@@ -35,6 +40,45 @@ class UsageService: ObservableObject {
     nonisolated private static let defaultUserinfoEndpoint = URL(string: "https://api.anthropic.com/api/oauth/userinfo")!
     nonisolated private static let defaultTokenEndpoint = URL(string: "https://platform.claude.com/v1/oauth/token")!
     nonisolated private static let defaultRedirectURI = "https://platform.claude.com/oauth/code/callback"
+    nonisolated static let usageEndpointOverrideKey = "CLAUDE_USAGE_BAR_USAGE_ENDPOINT"
+    nonisolated private static let loopbackHosts: Set<String> = ["localhost", "127.0.0.1", "::1"]
+
+    /// Endpoint override for testing against `scripts/mock-server.py`.
+    ///
+    /// Only http(s) loopback URLs are honoured — the request carries an OAuth
+    /// bearer token, so an environment variable must never be able to redirect
+    /// it off this machine. A rejected value is logged rather than silently
+    /// ignored, so a typo doesn't look like the mock server being hit.
+    nonisolated static func resolvedUsageEndpoint(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> URL {
+        let raw = environment[usageEndpointOverrideKey]?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !raw.isEmpty else { return defaultUsageEndpoint }
+
+        guard let url = URL(string: raw),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let host = url.host?.lowercased(),
+              loopbackHosts.contains(host) else {
+            print("""
+            [UsageService] Ignoring \(usageEndpointOverrideKey)="\(raw)" \
+            — only http(s) loopback URLs are allowed. \
+            Using \(defaultUsageEndpoint.absoluteString).
+            """)
+            return defaultUsageEndpoint
+        }
+
+        print("[UsageService] Using overridden usage endpoint \(url.absoluteString)")
+        return url
+    }
+
+    /// True when the usage endpoint points at a local mock rather than the real
+    /// API. A mock's 401 must never be treated as the real session expiring.
+    nonisolated private static func isLoopback(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return false }
+        return loopbackHosts.contains(host)
+    }
 
     @Published private(set) var pollingMinutes: Int
 
@@ -73,7 +117,7 @@ class UsageService: ObservableObject {
 
     init(
         session: URLSession = .shared,
-        usageEndpoint: URL = UsageService.defaultUsageEndpoint,
+        usageEndpoint: URL = UsageService.resolvedUsageEndpoint(),
         userinfoEndpoint: URL = UsageService.defaultUserinfoEndpoint,
         tokenEndpoint: URL = UsageService.defaultTokenEndpoint,
         redirectUri: String = UsageService.defaultRedirectURI,
@@ -156,7 +200,12 @@ class UsageService: ObservableObject {
     func submitOAuthCode(_ rawCode: String) async {
         // Response format: "code#state" — parse it
         let parts = rawCode.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "#", maxSplits: 1)
-        let code = String(parts[0])
+        // A whitespace-only paste trims to "" and yields no parts, so guard before
+        // indexing. Leave isAwaitingCode set so the user can retry without restarting.
+        guard let code = parts.first.map(String.init), !code.isEmpty else {
+            lastError = "No OAuth code entered"
+            return
+        }
 
         // State validation is mandatory when an OAuth flow is pending
         if oauthState != nil {
@@ -271,7 +320,21 @@ class UsageService: ObservableObject {
         }
 
         do {
-            guard let result = try await sendAuthorizedRequest(to: usageEndpoint) else {
+            // A local mock returning 401 must not delete the user's real
+            // credentials — the token endpoint is not overridable, so the
+            // refresh-then-retry path would otherwise sign them out for real.
+            // (It does still refresh against the real token endpoint, which
+            // rotates the refresh token; harmless, but worth knowing.)
+            let isLocalMock = Self.isLoopback(usageEndpoint)
+            guard let result = try await sendAuthorizedRequest(
+                to: usageEndpoint,
+                expireSessionOnAuthFailure: !isLocalMock
+            ) else {
+                // expireSession() normally reports this; skipping it must not
+                // leave stale numbers on screen with no indication why.
+                if isLocalMock, lastError == nil {
+                    lastError = "Local endpoint rejected the request — credentials left intact"
+                }
                 return
             }
             let (data, http) = result
@@ -378,7 +441,20 @@ class UsageService: ObservableObject {
         }
 
         if initialCredentials.needsRefresh() {
-            _ = await refreshCredentials(force: true)
+            let refreshResult = await refreshCredentials(force: true)
+            if refreshResult != .success, initialCredentials.isExpired() {
+                switch refreshResult {
+                case .permanentFailure:
+                    if expireSessionOnAuthFailure {
+                        expireSession()
+                    }
+                case .transientFailure:
+                    lastError = "Token refresh failed — will retry"
+                case .success:
+                    break
+                }
+                return nil
+            }
         }
 
         let activeCredentials = loadCredentials() ?? initialCredentials
@@ -392,27 +468,40 @@ class UsageService: ObservableObject {
             return result
         }
 
-        guard await refreshCredentials(force: true),
-              let refreshedCredentials = loadCredentials() else {
+        let refreshResult = await refreshCredentials(force: true)
+        switch refreshResult {
+        case .success:
+            guard let refreshedCredentials = loadCredentials() else {
+                if expireSessionOnAuthFailure {
+                    expireSession()
+                }
+                return nil
+            }
+
+            result = try await performAuthorizedRequest(
+                token: refreshedCredentials.accessToken,
+                url: url
+            )
+
+            if result.1.statusCode == 401 {
+                if expireSessionOnAuthFailure {
+                    expireSession()
+                }
+                return nil
+            }
+
+            return result
+
+        case .permanentFailure:
             if expireSessionOnAuthFailure {
                 expireSession()
             }
             return nil
-        }
 
-        result = try await performAuthorizedRequest(
-            token: refreshedCredentials.accessToken,
-            url: url
-        )
-
-        if result.1.statusCode == 401 {
-            if expireSessionOnAuthFailure {
-                expireSession()
-            }
+        case .transientFailure:
+            lastError = "Token refresh failed — will retry"
             return nil
         }
-
-        return result
     }
 
     private func performAuthorizedRequest(
@@ -430,30 +519,30 @@ class UsageService: ObservableObject {
         return (data, http)
     }
 
-    private func refreshCredentials(force: Bool) async -> Bool {
+    private func refreshCredentials(force: Bool) async -> RefreshResult {
         if let refreshTask {
             return await refreshTask.value
         }
 
         let task = Task { [weak self] in
-            guard let self else { return false }
+            guard let self else { return RefreshResult.permanentFailure }
             return await self.performRefresh(force: force)
         }
         refreshTask = task
-        let refreshed = await task.value
+        let result = await task.value
         refreshTask = nil
-        return refreshed
+        return result
     }
 
-    private func performRefresh(force: Bool) async -> Bool {
+    private func performRefresh(force: Bool) async -> RefreshResult {
         guard let currentCredentials = loadCredentials(),
               let refreshToken = currentCredentials.refreshToken,
               refreshToken.isEmpty == false else {
-            return false
+            return .permanentFailure
         }
 
         if force == false, currentCredentials.needsRefresh() == false {
-            return true
+            return .success
         }
 
         var request = URLRequest(url: tokenEndpoint)
@@ -470,23 +559,47 @@ class UsageService: ObservableObject {
         }
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
+        let data: Data
+        let http: HTTPURLResponse
         do {
-            let (data, response) = try await session.data(for: request)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200,
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let updatedCredentials = credentials(
-                    from: json,
-                    fallback: currentCredentials
-                  ) else {
-                return false
+            let (responseData, response) = try await session.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                return .transientFailure
             }
-
-            try saveCredentials(updatedCredentials)
-            isAuthenticated = true
-            return true
+            data = responseData
+            http = httpResponse
         } catch {
-            return false
+            return .transientFailure
         }
+
+        guard http.statusCode == 200 else {
+            if http.statusCode >= 400, http.statusCode < 500 {
+                return .permanentFailure
+            }
+            return .transientFailure
+        }
+
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let updatedCredentials = credentials(
+                from: json,
+                fallback: currentCredentials
+              ) else {
+            return .transientFailure
+        }
+
+        do {
+            try saveCredentials(updatedCredentials)
+        } catch {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            do {
+                try saveCredentials(updatedCredentials)
+            } catch {
+                return .transientFailure
+            }
+        }
+
+        isAuthenticated = true
+        return .success
     }
 
     private func credentials(

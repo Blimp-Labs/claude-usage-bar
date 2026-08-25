@@ -40,84 +40,66 @@ final class StoredCredentialsTests: XCTestCase {
         XCTAssertEqual(loaded.scopes, UsageService.defaultOAuthScopes)
     }
 
-    func testFileMigrationToKeychainRemovesFileOnSuccess() throws {
-        // Write credentials as file first (simulating pre-Keychain state)
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    // MARK: - isExpired
 
-        let fileStore = StoredCredentialsStore(directoryURL: directory, useKeychain: false)
+    func testIsExpiredReturnsFalseWhenExpiresAtIsNil() {
         let credentials = StoredCredentials(
-            accessToken: "migrate-me",
-            refreshToken: "refresh-migrate",
-            expiresAt: Date(timeIntervalSince1970: 1_741_194_400),
+            accessToken: "token",
+            refreshToken: "refresh",
+            expiresAt: nil,
             scopes: ["user:profile"]
         )
-        try fileStore.save(credentials)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: fileStore.credentialsFileURL.path))
-
-        // Now load with Keychain-enabled store — should migrate
-        let keychainService = "claude-usage-bar-test-\(UUID().uuidString)"
-        let keychainStore = StoredCredentialsStore(
-            directoryURL: directory,
-            useKeychain: true,
-            keychainService: keychainService
-        )
-
-        let loaded = try XCTUnwrap(keychainStore.load(defaultScopes: []))
-        XCTAssertEqual(loaded.accessToken, "migrate-me")
-        XCTAssertEqual(loaded.refreshToken, "refresh-migrate")
-
-        // File should be removed after successful Keychain migration
-        XCTAssertFalse(FileManager.default.fileExists(atPath: fileStore.credentialsFileURL.path))
-
-        // Subsequent load should still work (from Keychain now)
-        let reloaded = try XCTUnwrap(keychainStore.load(defaultScopes: []))
-        XCTAssertEqual(reloaded.accessToken, "migrate-me")
-
-        // Cleanup Keychain
-        keychainStore.delete()
+        XCTAssertFalse(credentials.isExpired())
     }
 
-    func testLegacyTokenMigrationToKeychainRemovesFile() throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-
-        let keychainService = "claude-usage-bar-test-\(UUID().uuidString)"
-        let store = StoredCredentialsStore(
-            directoryURL: directory,
-            useKeychain: true,
-            keychainService: keychainService
+    func testIsExpiredReturnsTrueWhenPastExpiry() {
+        let credentials = StoredCredentials(
+            accessToken: "token",
+            refreshToken: "refresh",
+            expiresAt: Date().addingTimeInterval(-60),
+            scopes: ["user:profile"]
         )
+        XCTAssertTrue(credentials.isExpired())
+    }
 
-        // Write a legacy plaintext token file
-        try "legacy-token-to-migrate".write(
-            to: store.legacyTokenFileURL,
-            atomically: true,
-            encoding: .utf8
+    func testIsExpiredReturnsFalseWhenBeforeExpiry() {
+        let credentials = StoredCredentials(
+            accessToken: "token",
+            refreshToken: "refresh",
+            expiresAt: Date().addingTimeInterval(3600),
+            scopes: ["user:profile"]
         )
-        XCTAssertTrue(FileManager.default.fileExists(atPath: store.legacyTokenFileURL.path))
+        XCTAssertFalse(credentials.isExpired())
+    }
 
-        let loaded = try XCTUnwrap(store.load(defaultScopes: UsageService.defaultOAuthScopes))
-        XCTAssertEqual(loaded.accessToken, "legacy-token-to-migrate")
+    // MARK: - needsRefresh leeway
 
-        // Legacy file should be removed after Keychain migration
-        XCTAssertFalse(FileManager.default.fileExists(atPath: store.legacyTokenFileURL.path))
+    func testNeedsRefreshUses300SecondLeewayByDefault() {
+        let now = Date()
+        let credentials = StoredCredentials(
+            accessToken: "token",
+            refreshToken: "refresh",
+            expiresAt: now.addingTimeInterval(200),
+            scopes: ["user:profile"]
+        )
+        // 200s until expiry < 300s leeway → needs refresh
+        XCTAssertTrue(credentials.needsRefresh(at: now))
 
-        // Subsequent load from Keychain should work
-        let reloaded = try XCTUnwrap(store.load(defaultScopes: UsageService.defaultOAuthScopes))
-        XCTAssertEqual(reloaded.accessToken, "legacy-token-to-migrate")
-
-        // Cleanup Keychain
-        store.delete()
+        let safeCredentials = StoredCredentials(
+            accessToken: "token",
+            refreshToken: "refresh",
+            expiresAt: now.addingTimeInterval(400),
+            scopes: ["user:profile"]
+        )
+        // 400s until expiry > 300s leeway → does not need refresh
+        XCTAssertFalse(safeCredentials.needsRefresh(at: now))
     }
 
     private func makeStore() throws -> StoredCredentialsStore {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return StoredCredentialsStore(directoryURL: directory, useKeychain: false)
+        return StoredCredentialsStore(directoryURL: directory)
     }
 
     private func permissions(for url: URL) throws -> Int {
