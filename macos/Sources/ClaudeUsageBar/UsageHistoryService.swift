@@ -77,6 +77,12 @@ class UsageHistoryService: ObservableObject {
 
         guard let data = try? JSONEncoder.historyEncoder.encode(history) else { return }
         let url = historyFileURL
+        // Resolved once at init, so recreate it here — this app runs for weeks
+        // and a directory that vanishes would otherwise end writes silently.
+        try? FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
         let tempURL = url.appendingPathExtension("tmp")
         try? FileManager.default.removeItem(at: tempURL)
         guard FileManager.default.createFile(

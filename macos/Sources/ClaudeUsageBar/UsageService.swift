@@ -166,6 +166,10 @@ class UsageService: ObservableObject {
     // MARK: - OAuth PKCE Flow
 
     func startOAuthFlow() {
+        // Otherwise a failed open leaves its error under the code-entry field
+        // for the whole of the next attempt.
+        lastError = nil
+
         let verifier = generateCodeVerifier()
         let challenge = generateCodeChallenge(from: verifier)
         let state = generateCodeVerifier() // random state
