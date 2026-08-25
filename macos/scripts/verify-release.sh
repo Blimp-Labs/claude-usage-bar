@@ -41,6 +41,17 @@ verify_app_bundle() {
 
     verify_build_target "$app_bundle/Contents/MacOS/$APP_NAME"
 
+    # Notifications are gated on this key at runtime (see
+    # supportsUserNotifications). Nothing else asserts it, and losing it fails
+    # silently: every user simply stops getting notifications.
+    echo "==> Verifying bundle package type..."
+    package_type="$(plutil -extract CFBundlePackageType raw "$app_plist" 2>/dev/null || true)"
+    if [[ "$package_type" != "APPL" ]]; then
+        echo "Error: CFBundlePackageType is '${package_type:-<missing>}', expected APPL."
+        echo "       Notifications are disabled at runtime without it."
+        exit 1
+    fi
+
     echo "==> Verifying updater metadata..."
     plutil -extract SUPublicEDKey raw "$app_plist" >/dev/null
 

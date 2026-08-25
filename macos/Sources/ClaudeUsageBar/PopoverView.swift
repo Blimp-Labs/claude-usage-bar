@@ -193,7 +193,7 @@ private struct SetupView: View {
                 .foregroundStyle(.secondary)
 
             if !notificationService.isAvailable {
-                Text("Unavailable in this build.")
+                Text(notificationsUnavailableMessage)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }

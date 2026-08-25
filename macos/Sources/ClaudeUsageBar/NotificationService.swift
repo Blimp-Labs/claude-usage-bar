@@ -176,6 +176,11 @@ class NotificationService: ObservableObject {
     }
 }
 
+/// Shown wherever notification controls are offered but cannot work. Only
+/// reachable in development — a packaged build always declares APPL.
+let notificationsUnavailableMessage =
+    "Notifications require a packaged application build — run `make app` and launch the bundle."
+
 /// Whether this process can use `UNUserNotificationCenter` at all.
 ///
 /// `UNUserNotificationCenter.current()` aborts the process rather than
@@ -185,10 +190,11 @@ class NotificationService: ObservableObject {
 /// `LSBundleProxy` alone does not trigger the abort — so this errs toward the
 /// configurations known to work.
 ///
-/// `CFBundlePackageType` is what CoreFoundation consults to identify a bundle's
-/// type; the path extension is only its documented *fallback* when that key is
-/// absent. Checking the key therefore also gets renamed, symlinked and
-/// oddly-cased bundles right, and excludes app extensions (which declare
+/// `CFBundlePackageType` is the key that declares a bundle's type.
+/// `object(forInfoDictionaryKey:)` reads it strictly — a `.app` that omits the
+/// key returns nil rather than falling back to the path extension — so this
+/// depends on nothing but the declaration itself. That gets renamed, symlinked
+/// and oddly-cased bundles right, and excludes app extensions (which declare
 /// `XPC!`) for free. Under `swift test` and `swift run` there is no such key,
 /// which is exactly the case that used to abort.
 func supportsUserNotifications(bundle: Bundle = .main) -> Bool {

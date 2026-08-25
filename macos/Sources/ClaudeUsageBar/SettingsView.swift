@@ -24,7 +24,7 @@ struct SettingsWindowContent: View {
 
             Section("Notifications") {
                 if !notificationService.isAvailable {
-                    Text("Notifications are unavailable in this build — run the app from a packaged .app bundle.")
+                    Text(notificationsUnavailableMessage)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
