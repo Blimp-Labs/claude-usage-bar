@@ -85,7 +85,15 @@ class UsageHistoryService: ObservableObject {
             attributes: [.posixPermissions: 0o600]
         ) else { return }
         do {
-            _ = try FileManager.default.replaceItemAt(url, withItemAt: tempURL)
+            // .usingNewMetadataOnly matters on the upgrade path: without it
+            // replaceItemAt keeps the ORIGINAL file's metadata, so a
+            // history.json already on disk at 0644 stays 0644 forever and only
+            // fresh installs get the tighter permissions.
+            _ = try FileManager.default.replaceItemAt(
+                url,
+                withItemAt: tempURL,
+                options: [.usingNewMetadataOnly]
+            )
         } catch {
             try? FileManager.default.removeItem(at: tempURL)
             return

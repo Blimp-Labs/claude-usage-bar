@@ -74,6 +74,26 @@ final class UsageHistoryServiceTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: service.historyFileURL.path))
     }
 
+
+    /// The upgrade path, which the fresh-temp-dir tests above cannot reach:
+    /// every existing install already has a history.json at 0644. replaceItemAt
+    /// keeps the original item's metadata unless told otherwise, so without
+    /// .usingNewMetadataOnly the tightening only ever applied to new installs.
+    func testExistingLooseFileIsTightenedOnFlush() throws {
+        let service = makeService()
+        FileManager.default.createFile(
+            atPath: service.historyFileURL.path,
+            contents: Data("{\"dataPoints\":[]}".utf8),
+            attributes: [.posixPermissions: 0o644]
+        )
+
+        service.recordDataPoint(pct5h: 0.5, pct7d: 0.5)
+        service.flushToDisk()
+
+        let attrs = try FileManager.default.attributesOfItem(atPath: service.historyFileURL.path)
+        XCTAssertEqual(attrs[.posixPermissions] as? Int, 0o600)
+    }
+
     func testPermissionsPreservedAfterMultipleFlushes() throws {
         let service = makeService()
         service.recordDataPoint(pct5h: 0.1, pct7d: 0.2)
