@@ -272,14 +272,6 @@ final class UsageServiceTests: XCTestCase {
         XCTAssertEqual(saved.refreshToken, "refresh-new")
     }
 
-    func testSubmitOAuthCodeRejectsMissingState() async throws {
-        let store = try makeStore()
-        let tokenURL = URL(string: "https://example.com/v1/oauth/token")!
-        var openedURL: URL?
-
-        MockURLProtocol.handler = { request in
-            XCTFail("No network request should be made when state is missing")
-            return try Self.httpResponse(url: request.url!, statusCode: 500)
     // MARK: - Transient vs permanent refresh failure
 
     func testServer500DuringRefreshStaysAuthenticated() async throws {
@@ -312,34 +304,6 @@ final class UsageServiceTests: XCTestCase {
 
         let service = UsageService(
             session: makeSession(),
-            usageEndpoint: URL(string: "https://example.com/api/oauth/usage")!,
-            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
-            tokenEndpoint: tokenURL,
-            credentialsStore: store,
-            urlOpener: { url in
-                openedURL = url
-                return true
-            }
-        )
-
-        // Start an OAuth flow so oauthState is set
-        service.startOAuthFlow()
-        XCTAssertTrue(service.isAwaitingCode)
-        XCTAssertTrue(openedURL?.absoluteString.hasPrefix("https://claude.ai/oauth/authorize") == true)
-
-        // Submit code WITHOUT #state — should be rejected
-        await service.submitOAuthCode("some-auth-code")
-
-        XCTAssertFalse(service.isAwaitingCode)
-        XCTAssertFalse(service.isAuthenticated)
-        XCTAssertEqual(service.lastError, "Missing OAuth state — expected code#state format")
-    }
-
-    func testStartOAuthFlowFailsCleanlyWhenBrowserCannotOpen() throws {
-        let store = try makeStore()
-        let tokenURL = URL(string: "https://example.com/v1/oauth/token")!
-        var openedURL: URL?
-
             usageEndpoint: usageURL,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: tokenURL,
@@ -692,6 +656,61 @@ final class UsageServiceTests: XCTestCase {
             session: makeSession(),
             usageEndpoint: URL(string: "https://example.com/api/oauth/usage")!,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
+            credentialsStore: try makeStore()
+        )
+
+        await service.submitOAuthCode("   ")
+
+        XCTAssertEqual(service.lastError, "No OAuth code entered")
+        XCTAssertFalse(service.isAuthenticated)
+    }
+
+
+    func testSubmitOAuthCodeRejectsMissingState() async throws {
+        let store = try makeStore()
+        let tokenURL = URL(string: "https://example.com/v1/oauth/token")!
+        var openedURL: URL?
+
+        MockURLProtocol.handler = { request in
+            XCTFail("No network request should be made when state is missing")
+            return try Self.httpResponse(url: request.url!, statusCode: 500)
+        }
+
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: URL(string: "https://example.com/api/oauth/usage")!,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: tokenURL,
+            credentialsStore: store,
+            urlOpener: { url in
+                openedURL = url
+                return true
+            }
+        )
+
+        // Start an OAuth flow so oauthState is set
+        service.startOAuthFlow()
+        XCTAssertTrue(service.isAwaitingCode)
+        XCTAssertTrue(openedURL?.absoluteString.hasPrefix("https://claude.ai/oauth/authorize") == true)
+
+        // Submit code WITHOUT #state — should be rejected
+        await service.submitOAuthCode("some-auth-code")
+
+        XCTAssertFalse(service.isAwaitingCode)
+        XCTAssertFalse(service.isAuthenticated)
+        XCTAssertEqual(service.lastError, "Missing OAuth state — expected code#state format")
+    }
+
+    func testStartOAuthFlowFailsCleanlyWhenBrowserCannotOpen() throws {
+        let store = try makeStore()
+        let tokenURL = URL(string: "https://example.com/v1/oauth/token")!
+        var openedURL: URL?
+
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: URL(string: "https://example.com/api/oauth/usage")!,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: tokenURL,
             credentialsStore: store,
             urlOpener: { url in
@@ -705,21 +724,12 @@ final class UsageServiceTests: XCTestCase {
         XCTAssertTrue(openedURL?.absoluteString.hasPrefix("https://claude.ai/oauth/authorize") == true)
         XCTAssertFalse(service.isAwaitingCode)
         XCTAssertEqual(service.lastError, "Could not open Claude sign-in page")
-            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
-            credentialsStore: try makeStore()
-        )
-
-        await service.submitOAuthCode("   ")
-
-        XCTAssertEqual(service.lastError, "No OAuth code entered")
-        XCTAssertFalse(service.isAuthenticated)
     }
-
     private func makeStore() throws -> StoredCredentialsStore {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return StoredCredentialsStore(directoryURL: directory, useKeychain: false)
+        return StoredCredentialsStore(directoryURL: directory)
     }
 
     private func makeSession() -> URLSession {

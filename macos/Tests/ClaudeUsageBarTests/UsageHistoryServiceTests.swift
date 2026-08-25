@@ -47,8 +47,8 @@ final class UsageHistoryServiceTests: XCTestCase {
         service2.loadHistory()
 
         XCTAssertEqual(service2.history.dataPoints.count, 1)
-        XCTAssertEqual(service2.history.dataPoints.first?.pct5h, 0.42, accuracy: 0.001)
-        XCTAssertEqual(service2.history.dataPoints.first?.pct7d, 0.88, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(service2.history.dataPoints.first).pct5h, 0.42, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(service2.history.dataPoints.first).pct7d, 0.88, accuracy: 0.001)
     }
 
     func testFlushPreservesExistingFileOnSecondWrite() throws {
