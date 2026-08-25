@@ -66,11 +66,21 @@ class NotificationService: ObservableObject {
     private var previousPctExtra: Double?
     private let delegate = NotificationDelegate()
 
+    /// `bundleIdentifier != nil` is not enough: under xctest, Bundle.main is
+    /// Xcode's own command-line tools directory, which has an identifier but no
+    /// app bundle — and UNUserNotificationCenter.current() then aborts the
+    /// process rather than failing gracefully.
+    nonisolated static var hasAppBundle: Bool { isAppBundle(.main) }
+
+    nonisolated static func isAppBundle(_ bundle: Bundle) -> Bool {
+        bundle.bundleURL.pathExtension == "app" && bundle.bundleIdentifier != nil
+    }
+
     init() {
         threshold5h = Self.load("notificationThreshold5h")
         threshold7d = Self.load("notificationThreshold7d")
         thresholdExtra = Self.load("notificationThresholdExtra")
-        if Bundle.main.bundleIdentifier != nil {
+        if Self.hasAppBundle {
             UNUserNotificationCenter.current().delegate = delegate
         }
     }
@@ -97,7 +107,7 @@ class NotificationService: ObservableObject {
     }
 
     func requestPermission() {
-        guard Bundle.main.bundleIdentifier != nil else { return }
+        guard Self.hasAppBundle else { return }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
@@ -134,7 +144,7 @@ class NotificationService: ObservableObject {
     }
 
     private func sendNotification(window: String, pct: Int) {
-        guard Bundle.main.bundleIdentifier != nil else {
+        guard Self.hasAppBundle else {
             print("[Notification] \(window) usage has reached \(pct)% (no bundle – skipped)")
             return
         }

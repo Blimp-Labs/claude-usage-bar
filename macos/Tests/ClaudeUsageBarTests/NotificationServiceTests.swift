@@ -111,4 +111,26 @@ final class NotificationServiceTests: XCTestCase {
             ThresholdAlert(window: "Extra usage", pct: 75),
         ])
     }
+
+    // MARK: - App bundle detection
+
+    /// The precondition that made the old guard wrong: under xctest, Bundle.main
+    /// is Xcode's command-line tools directory, which *does* have a
+    /// bundleIdentifier. Checking only the identifier let the guard pass here.
+    func testTestHostHasAnIdentifierButIsNotAnAppBundle() {
+        XCTAssertNotNil(
+            Bundle.main.bundleIdentifier,
+            "if this is ever nil, the old identifier-only guard would have been sufficient"
+        )
+        XCTAssertFalse(NotificationService.isAppBundle(.main))
+    }
+
+    /// Regression: this call aborted the whole test process with signal 6
+    /// ("bundleProxyForCurrentProcess is nil") because the guard let it reach
+    /// UNUserNotificationCenter.current(). Any test constructing a
+    /// NotificationService took the entire suite down with it.
+    @MainActor
+    func testConstructingTheServiceWithoutAnAppBundleDoesNotAbort() {
+        _ = NotificationService()
+    }
 }
