@@ -30,6 +30,12 @@ struct SettingsWindowContent: View {
             }
 
             Section("Notifications") {
+                if !notificationService.isAvailable {
+                    Text(notificationsUnavailableMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 ThresholdSlider(
                     label: "5-hour window",
                     value: notificationService.threshold5h,
@@ -46,6 +52,7 @@ struct SettingsWindowContent: View {
                     onChange: { notificationService.setThresholdExtra($0) }
                 )
             }
+            .disabled(!notificationService.isAvailable)
 
             Section("Appearance") {
                 Toggle("Show forecast marker", isOn: $showForecast)
