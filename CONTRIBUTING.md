@@ -11,7 +11,7 @@ Thanks for your interest in contributing! This guide will help you get set up an
 ## Getting started
 
 ```sh
-git clone https://github.com/Blimp-Labs/claude-usage-bar.git
+git clone https://github.com/herbertkokholm/claude-usage-bar.git
 cd claude-usage-bar
 make app
 ```

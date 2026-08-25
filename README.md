@@ -37,17 +37,17 @@ A tiny macOS menu bar app that shows your Claude API usage at a glance. Click it
 
 ### Download
 
-1. Download `ClaudeUsageBar.dmg` from the [latest release](https://github.com/Blimp-Labs/claude-usage-bar/releases/latest)
+1. Download `ClaudeUsageBar.dmg` from the [latest release](https://github.com/herbertkokholm/claude-usage-bar/releases/latest)
 2. Open the disk image and drag `ClaudeUsageBar.app` into `Applications`
 3. Launch the app from `/Applications`
 4. macOS may require right-click → **Open** on first launch
 
 ### Build from source
 
-Requires Xcode 15+ / Swift 5.9+ and macOS 14 (Sonoma) or later.
+Requires Xcode 15+ / Swift 5.9+ and macOS 14 (Sonoma) or later. Note: building with Xcode 15 (macOS 14 SDK) links against the legacy chrome — use Xcode 26+ to get the Liquid Glass appearance on macOS 26 (Tahoe) or later.
 
 ```sh
-git clone https://github.com/Blimp-Labs/claude-usage-bar.git
+git clone https://github.com/herbertkokholm/claude-usage-bar.git
 cd claude-usage-bar
 make app            # build .app bundle
 make dmg            # build drag-to-Applications disk image
