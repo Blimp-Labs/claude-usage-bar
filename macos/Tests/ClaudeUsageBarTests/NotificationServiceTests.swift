@@ -112,25 +112,64 @@ final class NotificationServiceTests: XCTestCase {
         ])
     }
 
-    // MARK: - App bundle detection
+    // MARK: - Notification availability
 
-    /// The precondition that made the old guard wrong: under xctest, Bundle.main
-    /// is Xcode's command-line tools directory, which *does* have a
-    /// bundleIdentifier. Checking only the identifier let the guard pass here.
-    func testTestHostHasAnIdentifierButIsNotAnAppBundle() {
-        XCTAssertNotNil(
-            Bundle.main.bundleIdentifier,
-            "if this is ever nil, the old identifier-only guard would have been sufficient"
-        )
-        XCTAssertFalse(NotificationService.isAppBundle(.main))
+    /// The branch every real user is on. Without this, hardcoding the predicate
+    /// to `false` — notifications permanently dead for everyone — passes.
+    func testAnAppBundleIsSupported() throws {
+        let bundle = try fixtureBundle(packageType: "APPL")
+        XCTAssertTrue(supportsUserNotifications(bundle: bundle))
     }
 
-    /// Regression: this call aborted the whole test process with signal 6
-    /// ("bundleProxyForCurrentProcess is nil") because the guard let it reach
-    /// UNUserNotificationCenter.current(). Any test constructing a
-    /// NotificationService took the entire suite down with it.
+    /// The path extension is not consulted, so a renamed or oddly-cased bundle
+    /// still works — those are the configurations the extension check broke.
+    func testSupportDoesNotDependOnThePathExtension() throws {
+        for name in ["Renamed", "Upper.APP", "NoExtension"] {
+            let bundle = try fixtureBundle(packageType: "APPL", directoryName: name)
+            XCTAssertTrue(supportsUserNotifications(bundle: bundle), "should support \(name)")
+        }
+    }
+
+    /// App extensions declare XPC! and must be excluded.
+    func testAnAppExtensionIsNotSupported() throws {
+        let bundle = try fixtureBundle(packageType: "XPC!", directoryName: "Thing.appex")
+        XCTAssertFalse(supportsUserNotifications(bundle: bundle))
+    }
+
+    func testABundleWithNoPackageTypeIsNotSupported() throws {
+        let bundle = try fixtureBundle(packageType: nil)
+        XCTAssertFalse(supportsUserNotifications(bundle: bundle))
+    }
+
+    /// Regression: this call aborted the whole test process with SIGABRT
+    /// ("bundleProxyForCurrentProcess is nil"): under xctest Bundle.main is
+    /// /Applications/Xcode.app/Contents/Developer/usr/bin, which has an
+    /// identifier, so the old identifier-only guard let it
+    /// reach UNUserNotificationCenter.current().
     @MainActor
     func testConstructingTheServiceWithoutAnAppBundleDoesNotAbort() {
-        _ = NotificationService()
+        let service = NotificationService()
+        XCTAssertFalse(service.isAvailable, "the test host is not an app bundle")
+    }
+
+    private func fixtureBundle(
+        packageType: String?,
+        directoryName: String = "Fixture.app"
+    ) throws -> Bundle {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .appendingPathComponent(directoryName, isDirectory: true)
+        let contents = root.appendingPathComponent("Contents", isDirectory: true)
+        try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+
+        var info: [String: Any] = ["CFBundleIdentifier": "com.example.fixture"]
+        if let packageType { info["CFBundlePackageType"] = packageType }
+        let data = try PropertyListSerialization.data(
+            fromPropertyList: info, format: .xml, options: 0
+        )
+        try data.write(to: contents.appendingPathComponent("Info.plist"))
+
+        return try XCTUnwrap(Bundle(url: root))
     }
 }

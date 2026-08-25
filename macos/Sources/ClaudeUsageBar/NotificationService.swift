@@ -66,21 +66,15 @@ class NotificationService: ObservableObject {
     private var previousPctExtra: Double?
     private let delegate = NotificationDelegate()
 
-    /// `bundleIdentifier != nil` is not enough: under xctest, Bundle.main is
-    /// Xcode's own command-line tools directory, which has an identifier but no
-    /// app bundle — and UNUserNotificationCenter.current() then aborts the
-    /// process rather than failing gracefully.
-    nonisolated static var hasAppBundle: Bool { isAppBundle(.main) }
-
-    nonisolated static func isAppBundle(_ bundle: Bundle) -> Bool {
-        bundle.bundleURL.pathExtension == "app" && bundle.bundleIdentifier != nil
-    }
+    /// False when this process cannot use notifications at all, so callers can
+    /// say so instead of silently doing nothing.
+    let isAvailable = supportsUserNotifications()
 
     init() {
         threshold5h = Self.load("notificationThreshold5h")
         threshold7d = Self.load("notificationThreshold7d")
         thresholdExtra = Self.load("notificationThresholdExtra")
-        if Self.hasAppBundle {
+        if isAvailable {
             UNUserNotificationCenter.current().delegate = delegate
         }
     }
@@ -107,7 +101,10 @@ class NotificationService: ObservableObject {
     }
 
     func requestPermission() {
-        guard Self.hasAppBundle else { return }
+        guard isAvailable else {
+            print("[Notification] Permission not requested — no app bundle")
+            return
+        }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
@@ -144,7 +141,7 @@ class NotificationService: ObservableObject {
     }
 
     private func sendNotification(window: String, pct: Int) {
-        guard Self.hasAppBundle else {
+        guard isAvailable else {
             print("[Notification] \(window) usage has reached \(pct)% (no bundle – skipped)")
             return
         }
@@ -177,4 +174,23 @@ class NotificationService: ObservableObject {
         let value = UserDefaults.standard.integer(forKey: key)
         return max(0, min(100, value))
     }
+}
+
+/// Whether this process can use `UNUserNotificationCenter` at all.
+///
+/// `UNUserNotificationCenter.current()` aborts the process rather than
+/// returning nil when it is unhappy, and Apple exposes no availability check,
+/// so this is a deliberately conservative heuristic rather than a documented
+/// test. The precise precondition it enforces is not public — a nil
+/// `LSBundleProxy` alone does not trigger the abort — so this errs toward the
+/// configurations known to work.
+///
+/// `CFBundlePackageType` is what CoreFoundation consults to identify a bundle's
+/// type; the path extension is only its documented *fallback* when that key is
+/// absent. Checking the key therefore also gets renamed, symlinked and
+/// oddly-cased bundles right, and excludes app extensions (which declare
+/// `XPC!`) for free. Under `swift test` and `swift run` there is no such key,
+/// which is exactly the case that used to abort.
+func supportsUserNotifications(bundle: Bundle = .main) -> Bool {
+    bundle.object(forInfoDictionaryKey: "CFBundlePackageType") as? String == "APPL"
 }
