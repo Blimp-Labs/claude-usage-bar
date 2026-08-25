@@ -192,6 +192,12 @@ private struct SetupView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
+            if !notificationService.isAvailable {
+                Text(notificationsUnavailableMessage)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
             SetupThresholdSlider(
                 label: "5-hour window",
                 value: notificationService.threshold5h,
@@ -208,6 +214,7 @@ private struct SetupView: View {
                 onChange: { notificationService.setThresholdExtra($0) }
             )
         }
+        .disabled(!notificationService.isAvailable)
 
         Divider()
 
