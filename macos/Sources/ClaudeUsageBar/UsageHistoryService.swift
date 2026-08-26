@@ -9,18 +9,20 @@ class UsageHistoryService: ObservableObject {
     private var flushTimer: AnyCancellable?
     private var isDirty = false
     private var terminationObserver: Any?
+    let historyFileURL: URL
 
     private static let retentionInterval: TimeInterval = 30 * 86400 // 30 days
     private static let flushInterval: TimeInterval = 300 // 5 minutes
 
-    private static var historyFileURL: URL {
+    private static var defaultHistoryFileURL: URL {
         let dir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".config/claude-usage-bar", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("history.json")
     }
 
-    init() {
+    init(historyFileURL: URL? = nil) {
+        self.historyFileURL = historyFileURL ?? Self.defaultHistoryFileURL
         terminationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification,
             object: nil, queue: .main
@@ -41,7 +43,7 @@ class UsageHistoryService: ObservableObject {
     // MARK: - Load
 
     func loadHistory() {
-        let url = Self.historyFileURL
+        let url = historyFileURL
         guard FileManager.default.fileExists(atPath: url.path) else { return }
 
         do {
@@ -74,7 +76,34 @@ class UsageHistoryService: ObservableObject {
         history.dataPoints = pruned(history.dataPoints)
 
         guard let data = try? JSONEncoder.historyEncoder.encode(history) else { return }
-        try? data.write(to: Self.historyFileURL, options: .atomic)
+        let url = historyFileURL
+        // Resolved once at init, so recreate it here — this app runs for weeks
+        // and a directory that vanishes would otherwise end writes silently.
+        try? FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let tempURL = url.appendingPathExtension("tmp")
+        try? FileManager.default.removeItem(at: tempURL)
+        guard FileManager.default.createFile(
+            atPath: tempURL.path,
+            contents: data,
+            attributes: [.posixPermissions: 0o600]
+        ) else { return }
+        do {
+            // .usingNewMetadataOnly matters on the upgrade path: without it
+            // replaceItemAt keeps the ORIGINAL file's metadata, so a
+            // history.json already on disk at 0644 stays 0644 forever and only
+            // fresh installs get the tighter permissions.
+            _ = try FileManager.default.replaceItemAt(
+                url,
+                withItemAt: tempURL,
+                options: [.usingNewMetadataOnly]
+            )
+        } catch {
+            try? FileManager.default.removeItem(at: tempURL)
+            return
+        }
 
         isDirty = false
         flushTimer?.cancel()
