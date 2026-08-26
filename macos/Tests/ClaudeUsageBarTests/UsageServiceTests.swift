@@ -845,10 +845,12 @@ final class UsageServiceTests: XCTestCase {
             }
         )
 
+        // Start an OAuth flow so oauthState is set
         service.startOAuthFlow()
         XCTAssertTrue(service.isAwaitingCode)
         XCTAssertTrue(openedURL?.absoluteString.hasPrefix("https://claude.ai/oauth/authorize") == true)
 
+        // Submit code WITHOUT #state — should be rejected
         await service.submitOAuthCode("some-auth-code")
 
         XCTAssertFalse(service.isAwaitingCode)

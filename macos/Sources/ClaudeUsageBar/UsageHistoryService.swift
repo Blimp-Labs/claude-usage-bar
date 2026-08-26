@@ -1,14 +1,18 @@
 import Foundation
+import Combine
 import AppKit
 
 @MainActor
 class UsageHistoryService: ObservableObject {
     @Published var history = UsageHistory()
 
+    private var flushTimer: AnyCancellable?
+    private var isDirty = false
     private var terminationObserver: Any?
     let historyFileURL: URL
 
     private static let retentionInterval: TimeInterval = 30 * 86400 // 30 days
+    private static let flushInterval: TimeInterval = 300 // 5 minutes
 
     // The canonical location is Application Support, which is accessible inside the
     // app sandbox and follows macOS data-storage conventions. The legacy location
@@ -80,16 +84,25 @@ class UsageHistoryService: ObservableObject {
     func recordDataPoint(pct5h: Double, pct7d: Double) {
         let point = UsageDataPoint(pct5h: pct5h, pct7d: pct7d)
         history.dataPoints.append(point)
-        flushToDisk()
+        isDirty = true
+        startFlushTimerIfNeeded()
     }
 
     // MARK: - Flush
 
     func flushToDisk() {
+        guard isDirty else { return }
         history.dataPoints = pruned(history.dataPoints)
 
         guard let data = try? JSONEncoder.historyEncoder.encode(history) else { return }
         let url = historyFileURL
+        // Resolved once at init, so recreate it here — this app runs for weeks
+        // and a directory that vanishes while it's running would otherwise end
+        // writes silently for the rest of the process lifetime.
+        try? FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
         let tempURL = url.appendingPathExtension("tmp")
         try? FileManager.default.removeItem(at: tempURL)
         guard FileManager.default.createFile(
@@ -105,7 +118,21 @@ class UsageHistoryService: ObservableObject {
             try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
         } catch {
             try? FileManager.default.removeItem(at: tempURL)
+            return
         }
+
+        isDirty = false
+        flushTimer?.cancel()
+        flushTimer = nil
+    }
+
+    private func startFlushTimerIfNeeded() {
+        guard flushTimer == nil else { return }
+        flushTimer = Timer.publish(every: Self.flushInterval, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                self?.flushToDisk()
+            }
     }
 
     // MARK: - Downsampling
