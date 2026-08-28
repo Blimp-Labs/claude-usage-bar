@@ -66,11 +66,15 @@ class NotificationService: ObservableObject {
     private var previousPctExtra: Double?
     private let delegate = NotificationDelegate()
 
+    /// False when this process cannot use notifications at all, so callers can
+    /// say so instead of silently doing nothing.
+    let isAvailable = supportsUserNotifications()
+
     init() {
         threshold5h = Self.load("notificationThreshold5h")
         threshold7d = Self.load("notificationThreshold7d")
         thresholdExtra = Self.load("notificationThresholdExtra")
-        if Bundle.main.bundleIdentifier != nil {
+        if isAvailable {
             UNUserNotificationCenter.current().delegate = delegate
         }
     }
@@ -97,7 +101,10 @@ class NotificationService: ObservableObject {
     }
 
     func requestPermission() {
-        guard Bundle.main.bundleIdentifier != nil else { return }
+        guard isAvailable else {
+            print("[Notification] Permission not requested — no app bundle")
+            return
+        }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
@@ -134,7 +141,7 @@ class NotificationService: ObservableObject {
     }
 
     private func sendNotification(window: String, pct: Int) {
-        guard Bundle.main.bundleIdentifier != nil else {
+        guard isAvailable else {
             print("[Notification] \(window) usage has reached \(pct)% (no bundle – skipped)")
             return
         }
@@ -167,4 +174,29 @@ class NotificationService: ObservableObject {
         let value = UserDefaults.standard.integer(forKey: key)
         return max(0, min(100, value))
     }
+}
+
+/// Shown wherever notification controls are offered but cannot work. Only
+/// reachable in development — a packaged build always declares APPL.
+let notificationsUnavailableMessage =
+    "Notifications require a packaged application build — run `make app` and launch the bundle."
+
+/// Whether this process can use `UNUserNotificationCenter` at all.
+///
+/// `UNUserNotificationCenter.current()` aborts the process rather than
+/// returning nil when it is unhappy, and Apple exposes no availability check,
+/// so this is a deliberately conservative heuristic rather than a documented
+/// test. The precise precondition it enforces is not public — a nil
+/// `LSBundleProxy` alone does not trigger the abort — so this errs toward the
+/// configurations known to work.
+///
+/// `CFBundlePackageType` is the key that declares a bundle's type.
+/// `object(forInfoDictionaryKey:)` reads it strictly — a `.app` that omits the
+/// key returns nil rather than falling back to the path extension — so this
+/// depends on nothing but the declaration itself. That gets renamed, symlinked
+/// and oddly-cased bundles right, and excludes app extensions (which declare
+/// `XPC!`) for free. Under `swift test` and `swift run` there is no such key,
+/// which is exactly the case that used to abort.
+func supportsUserNotifications(bundle: Bundle = .main) -> Bool {
+    bundle.object(forInfoDictionaryKey: "CFBundlePackageType") as? String == "APPL"
 }

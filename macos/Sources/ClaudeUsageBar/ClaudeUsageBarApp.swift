@@ -57,7 +57,8 @@ struct ClaudeUsageBarApp: App {
         Settings {
             SettingsWindowContent(
                 service: service,
-                notificationService: notificationService
+                notificationService: notificationService,
+                appUpdater: appUpdater
             )
         }
         .windowResizability(.contentSize)

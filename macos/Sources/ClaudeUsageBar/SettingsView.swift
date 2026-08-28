@@ -4,6 +4,7 @@ import ServiceManagement
 struct SettingsWindowContent: View {
     @ObservedObject var service: UsageService
     @ObservedObject var notificationService: NotificationService
+    @ObservedObject var appUpdater: AppUpdater
 
     @AppStorage(AppearanceDefaultsKey.showResetDivider) private var showResetDivider = false
     @AppStorage(AppearanceDefaultsKey.coloredResetDivider) private var coloredResetDivider = true
@@ -28,6 +29,12 @@ struct SettingsWindowContent: View {
             }
 
             Section("Notifications") {
+                if !notificationService.isAvailable {
+                    Text(notificationsUnavailableMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 ThresholdSlider(
                     label: "5-hour window",
                     value: notificationService.threshold5h,
@@ -44,6 +51,7 @@ struct SettingsWindowContent: View {
                     onChange: { notificationService.setThresholdExtra($0) }
                 )
             }
+            .disabled(!notificationService.isAvailable)
 
             // Appearance: control the reset-time divider visibility and coloring on the menubar icon.
             // The divider shows when the usage bucket resets and changes color based on usage/time state.
@@ -90,6 +98,32 @@ struct SettingsWindowContent: View {
                     }
                 }
             }
+
+            Section("Updates") {
+                LabeledContent("Version") {
+                    Text(Self.appVersion)
+                        .textSelection(.enabled)
+                }
+
+                if appUpdater.isConfigured {
+                    Toggle("Check daily for updates", isOn: $appUpdater.automaticallyChecksForUpdates)
+
+                    Button("Check for Updates…") {
+                        appUpdater.checkForUpdates()
+                    }
+                    .disabled(!appUpdater.canCheckForUpdates)
+
+                    if let error = appUpdater.lastError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                } else {
+                    Text("This build has no update feed, so it cannot check for updates.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
         .formStyle(.grouped)
         .frame(minWidth: 400, maxWidth: 400, maxHeight: 600)
@@ -97,6 +131,21 @@ struct SettingsWindowContent: View {
         .onAppear {
             focusSettingsWindow()
         }
+    }
+}
+
+extension SettingsWindowContent {
+    static var appVersion: String {
+        displayVersion(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
+    }
+
+    /// `CFBundleVersion` is derived from the version string by build.sh
+    /// (0.0.10 -> 10), so appending it would only restate the number beside it.
+    /// The marketing version stands alone.
+    static func displayVersion(_ shortVersion: String?) -> String {
+        let trimmed = shortVersion?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmed, !trimmed.isEmpty else { return "unknown" }
+        return trimmed
     }
 }
 
@@ -113,11 +162,14 @@ private func focusSettingsWindow() {
 
 struct LaunchAtLoginToggle: View {
     @StateObject private var model: LaunchAtLoginModel
-    private let controlSize: ControlSize
+    /// nil means "inherit whatever the container provides". Forcing a size here
+    /// made this switch a different size from every other control in the
+    /// Settings form, which sets the ambient size for its section.
+    private let controlSize: ControlSize?
     private let useSwitchStyle: Bool
 
     init(
-        controlSize: ControlSize = .regular,
+        controlSize: ControlSize? = nil,
         useSwitchStyle: Bool = false,
         bundleURL: URL = Bundle.main.bundleURL
     ) {
@@ -147,12 +199,27 @@ struct LaunchAtLoginToggle: View {
             set: { model.setEnabled($0) }
         ))
         .disabled(!model.isSupported)
-        .controlSize(controlSize)
+
+        let sized = baseToggle.modifier(OptionalControlSize(controlSize: controlSize))
 
         if useSwitchStyle {
-            baseToggle.toggleStyle(.switch)
+            sized.toggleStyle(.switch)
         } else {
-            baseToggle
+            sized
+        }
+    }
+}
+
+/// Applies `.controlSize` only when one was requested, so the default is to
+/// inherit the container's.
+private struct OptionalControlSize: ViewModifier {
+    let controlSize: ControlSize?
+
+    func body(content: Content) -> some View {
+        if let controlSize {
+            content.controlSize(controlSize)
+        } else {
+            content
         }
     }
 }
