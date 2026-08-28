@@ -1,0 +1,11 @@
+{
+  "page": {"id": "tymt9n04zgry", "name": "Claude", "url": "https://status.claude.com", "time_zone": "Etc/UTC", "updated_at": "2026-05-06T08:41:02.090Z"},
+  "components": [
+    {"id": "rwppv331jlwc", "name": "claude.ai", "status": "operational", "position": 1, "group": false},
+    {"id": "k8w3r06qmzrp", "name": "Claude API (api.anthropic.com)", "status": "under_maintenance", "position": 3, "group": false},
+    {"id": "yyzkbfz2thpt", "name": "Claude Code", "status": "operational", "position": 4, "group": false}
+  ],
+  "incidents": [],
+  "scheduled_maintenances": [],
+  "status": {"indicator": "maintenance", "description": "Scheduled maintenance"}
+}

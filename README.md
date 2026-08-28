@@ -30,6 +30,51 @@ A tiny macOS menu bar app that shows your Claude API usage at a glance. Click it
 - Just sign in — OAuth via browser, no API keys to manage
 - Minimal dependencies — SwiftUI, Swift Charts, Foundation, and Sparkle for updates
 
+## Unreleased
+
+### Service status indicator
+
+When a Claude service incident is detected, the Claude logo in the menubar is tinted to signal severity. The indicator is **off by default** — enable it in Settings → Service Status.
+
+When enabled, the app polls `https://status.claude.com` (Statuspage.io public API, `/api/v2/summary.json`) and filters to three components: **Claude API**, **claude.ai**, and **Claude Code**. A single severity is computed as the maximum across those components:
+
+| Logo | Meaning |
+|------|---------|
+| Unchanged | All monitored components operational |
+| Yellow tint | One or more components under maintenance |
+| Orange tint | Degraded performance or partial outage on any component |
+| Red tint | Major outage on any component |
+
+**Settings** (Settings → Service Status):
+
+- **Show Claude service status** — master toggle (default off)
+- **Show non-operational statuses** — surface non-operational severities in the menubar
+- **Poll interval** — 1 / 5 / 15 / 30 min (default 5 min)
+
+Polling pauses on system sleep and resumes on wake. On network error the logo tint is removed and the popover shows "Status unavailable"; polling backs off exponentially (up to 30 min) until the next successful response.
+
+Clicking the Service Status section in the popover opens `https://status.claude.com` in your default browser.
+
+**Privacy:** the status endpoint is a public read-only API. No authentication headers are sent and no personal data leaves the device.
+
+> **Known follow-up (QA-flagged):** the menubar icon tooltip (`NSStatusItem.button.toolTip`) is not yet wired to the status text; the per-component status is visible in the popover instead.
+
+### Reset-time divider & appearance settings
+
+A vertical divider on the usage progress bars shows when your usage bucket resets. The divider position indicates where in the reset window you are, and its color signals your usage intensity:
+
+- **Neutral** (gray) — normal state, plenty of time remaining
+- **Warning** (orange) — less than 33% of the reset window remaining
+- **Critical** (dark orange) — high usage (≥80%) in any time window
+- **In limit** (red) — both high usage AND late in the window (highest alert)
+
+The divider appears on both the 5-hour and 7-day usage bars in the popover.
+
+**Appearance settings** (in the app's Settings window):
+
+- **Show reset time divider** — toggle to hide the divider from the menu bar icon and popover
+- **Colored status** — toggle between semantic colors (above) and a neutral gray for all states; disabled when the divider is hidden
+
 ## Install
 
 ### Download
@@ -144,7 +189,11 @@ macos/                           # macOS menu bar app (Swift/SwiftUI)
 │   ├── PopoverView.swift            # Main popover UI
 │   ├── SettingsView.swift           # Settings window
 │   ├── NotificationService.swift    # Usage threshold notifications
-│   ├── MenuBarIconRenderer.swift    # Menu bar icon drawing
+│   ├── MenuBarIconRenderer.swift    # Menu bar icon drawing + status logo tint
+│   ├── StatusPageClient.swift       # Statuspage.io v2 API client
+│   ├── StatusPageModels.swift       # Decodable models for status API responses
+│   ├── ClaudeServiceStatus.swift    # Severity enum + rollup + component filter
+│   ├── StatusMonitor.swift          # Polling, backoff, sleep/wake lifecycle
 │   ├── PollingOptionFormatter.swift # Polling interval display labels
 │   ├── AppUpdater.swift             # Sparkle update integration
 │   └── Resources/
