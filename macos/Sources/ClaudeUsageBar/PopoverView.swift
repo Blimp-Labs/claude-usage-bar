@@ -6,6 +6,7 @@ struct PopoverView: View {
     @ObservedObject var notificationService: NotificationService
     @ObservedObject var appUpdater: AppUpdater
     @AppStorage("setupComplete") private var setupComplete = false
+    @State private var hostingWindow: NSWindow?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -27,6 +28,16 @@ struct PopoverView: View {
         }
         .padding()
         .frame(width: 340)
+        .background(GeometryReader { geo in
+            Color.clear.preference(key: PopoverContentSizeKey.self, value: geo.size)
+        })
+        .background(PopoverWindowLocator { w in
+            hostingWindow = w
+        })
+        .onPreferenceChange(PopoverContentSizeKey.self) { size in
+            guard size != .zero else { return }
+            hostingWindow?.setContentSize(size)
+        }
     }
 
     @ViewBuilder
@@ -393,5 +404,32 @@ private func colorForPct(_ pct: Double) -> Color {
     case ..<0.60: return .green
     case 0.60..<0.80: return .yellow
     default: return .red
+    }
+}
+
+// MARK: - Adaptive window sizing
+
+private struct PopoverContentSizeKey: PreferenceKey {
+    static var defaultValue: CGSize = .zero
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) { value = nextValue() }
+}
+
+private final class WindowObservingView: NSView {
+    var onWindow: ((NSWindow) -> Void)?
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let w = window { onWindow?(w) }
+    }
+}
+
+private struct PopoverWindowLocator: NSViewRepresentable {
+    let onWindow: (NSWindow) -> Void
+    func makeNSView(context: Context) -> WindowObservingView {
+        let v = WindowObservingView()
+        v.onWindow = onWindow
+        return v
+    }
+    func updateNSView(_ v: WindowObservingView, context: Context) {
+        v.onWindow = onWindow
     }
 }
