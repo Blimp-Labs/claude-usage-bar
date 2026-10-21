@@ -78,8 +78,8 @@ verify_build_target() {
     local sdk
     while read -r sdk; do
         if [[ "${sdk%%.*}" -lt "$min_sdk_major" ]]; then
-            echo "Error: linked against SDK $sdk, need $min_sdk_major or newer."
-            echo "       The runner image is probably too old — check 'runs-on' in .github/workflows/."
+            echo "Error: linked against SDK $sdk, need $min_sdk_major or newer (Xcode $min_sdk_major+)."
+            echo "       On CI, check 'runs-on' in .github/workflows/. Locally, MIN_SDK_MAJOR=${sdk%%.*} skips this for a test build."
             exit 1
         fi
     done <<< "$sdks"

@@ -41,7 +41,7 @@ A tiny macOS menu bar app that shows your Claude API usage at a glance. Click it
 
 ### Build from source
 
-Requires Xcode 15+ / Swift 5.9+ and macOS 14 (Sonoma) or later.
+Requires Xcode 15+ / Swift 5.9+ and macOS 14 (Sonoma) or later. Packaging a release (`make zip`, `make dmg`) needs Xcode 26+, because the release check requires the macOS 26 SDK.
 
 ```sh
 git clone https://github.com/Blimp-Labs/claude-usage-bar.git

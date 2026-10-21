@@ -5,7 +5,7 @@ Thanks for your interest in contributing! This guide will help you get set up an
 ## Prerequisites
 
 - macOS 14 (Sonoma) or later
-- Xcode 15+ / Swift 5.9+
+- Xcode 15+ / Swift 5.9+ (Xcode 26+ for `make zip` / `make dmg`, whose release check requires the macOS 26 SDK)
 - Python 3 (for the mock server, included with macOS)
 
 ## Getting started
