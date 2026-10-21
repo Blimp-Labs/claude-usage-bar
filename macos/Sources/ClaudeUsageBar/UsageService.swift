@@ -184,7 +184,11 @@ class UsageService: ObservableObject {
         // Like Claude Code, the browser hands the code back to a listener on
         // 127.0.0.1. Without one, the user pastes the code instead.
         let listener = await startCallbackListener { [weak self] query in
-            guard let self else { return (400, Self.browserPage("This sign-in has ended.")) }
+            guard let self else {
+                return (400, await SignInPage.html(
+                    title: "This sign-in has ended", message: "Start again from Claude Usage Bar."
+                ))
+            }
             return await self.handleBrowserCallback(query)
         }
         guard oauthState == state else {
@@ -263,26 +267,33 @@ class UsageService: ObservableObject {
         // Anything without this sign-in's state is ignored rather than ending it.
         guard let state = oauthState, value("state") == state,
               let verifier = codeVerifier, let redirectURI = callbackListener?.redirectURI else {
-            return (400, Self.browserPage("Invalid state parameter."))
+            return (400, SignInPage.html(
+                title: "This sign-in has expired", message: "Start a new one from Claude Usage Bar."
+            ))
         }
         guard let code = value("code"), !code.isEmpty else {
             guard value("error") != nil else {
-                return (400, Self.browserPage("No authorization code received."))
+                return (400, SignInPage.html(
+                    title: "Sign-in didn't finish", message: "No authorization code was received."
+                ))
             }
             endOAuthFlow()
             lastError = "Sign-in was canceled in the browser"
-            return (200, Self.browserPage("Sign-in was canceled. You can close this tab."))
+            return (200, SignInPage.html(title: "Sign-in canceled", message: "You can close this tab."))
         }
 
         // The code only works once, so claim this sign-in before exchanging it.
         oauthState = nil
         guard await exchangeCode(code, state: state, verifier: verifier, redirectURI: redirectURI) else {
             endOAuthFlow()
-            return (200, Self.browserPage(
-                "Sign-in didn't finish: \(lastError ?? "unknown error"). Go back to Claude Usage Bar and try again."
+            return (200, SignInPage.html(
+                title: "Sign-in didn't finish",
+                message: "\(lastError ?? "Unknown error"). Try again from Claude Usage Bar."
             ))
         }
-        return (200, Self.browserPage("You're signed in to Claude Usage Bar. You can close this tab."))
+        return (200, SignInPage.html(
+            title: "You're signed in", message: "You can close this tab and go back to Claude Usage Bar."
+        ))
     }
 
     @discardableResult
@@ -351,17 +362,6 @@ class UsageService: ObservableObject {
             URLQueryItem(name: "state", value: state),
         ]
         return components.url!
-    }
-
-    nonisolated private static func browserPage(_ message: String) -> String {
-        let escaped = message
-            .replacingOccurrences(of: "&", with: "&amp;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
-        return """
-        <!doctype html><meta charset="utf-8"><title>Claude Usage Bar</title>
-        <body style="font: 15px -apple-system, sans-serif; text-align: center; margin-top: 30vh">\(escaped)</body>
-        """
     }
 
     func signOut() {
