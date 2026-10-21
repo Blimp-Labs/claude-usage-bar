@@ -14,23 +14,20 @@ Thanks for your interest in contributing! This guide will help you get set up an
 git clone https://github.com/Blimp-Labs/claude-usage-bar.git
 cd claude-usage-bar
 make app
+open macos/ClaudeUsageBar.app
 ```
 
-This builds the release binary via Swift Package Manager, bundles it as a `.app`, and codesigns it. The app also embeds Sparkle for update checks.
+`make app` builds the release binary with Swift Package Manager, bundles it as a `.app` with Sparkle embedded, and ad-hoc codesigns it.
 
-## Project structure
+Local builds have no update feed, so their updater is off and Settings shows version 1.0.0. That's deliberate: it stops forks and dev builds from updating themselves to official releases.
 
+## Running tests
+
+```sh
+cd macos && swift test
 ```
-Sources/ClaudeUsageBar/
-├── ClaudeUsageBarApp.swift      # App entry point, menu bar setup
-├── UsageService.swift           # OAuth, polling, API calls
-├── UsageModel.swift             # API response types
-├── UsageHistoryModel.swift      # History data types, time ranges
-├── UsageHistoryService.swift    # Persistence, downsampling
-├── UsageChartView.swift         # Swift Charts trajectory view
-├── PopoverView.swift            # Main popover UI
-└── MenuBarIconRenderer.swift    # Menu bar icon drawing
-```
+
+CI runs the same tests, plus `make release-artifacts`, on every pull request.
 
 ## Build commands
 
@@ -44,6 +41,44 @@ Sources/ClaudeUsageBar/
 | `make verify-release` | Inspect the packaged ZIP and DMG artifacts for required resources/frameworks |
 | `make install` | Build + install to `/Applications` |
 | `make clean` | Remove build artifacts |
+
+## Project structure
+
+```
+macos/                               # macOS menu bar app (Swift/SwiftUI)
+├── Sources/ClaudeUsageBar/
+│   ├── ClaudeUsageBarApp.swift      # App entry point, menu bar setup
+│   ├── UsageService.swift           # OAuth, polling, API calls
+│   ├── StoredCredentials.swift      # Saved sign-in tokens
+│   ├── UsageModel.swift             # API response types
+│   ├── UsageHistoryModel.swift      # History data types, time ranges
+│   ├── UsageHistoryService.swift    # Persistence, downsampling
+│   ├── UsageChartView.swift         # Swift Charts trajectory view
+│   ├── PopoverView.swift            # Main popover UI
+│   ├── SettingsView.swift           # Settings window
+│   ├── NotificationService.swift    # Usage threshold notifications
+│   ├── MenuBarIconRenderer.swift    # Menu bar icon drawing
+│   ├── PollingOptionFormatter.swift # Polling interval display labels
+│   ├── AppUpdater.swift             # Sparkle update integration
+│   ├── AppResources.swift           # Locates the SwiftPM resource bundle
+│   └── Resources/
+│       ├── claude-logo.png          # Pre-rendered menu bar logo (512px)
+│       └── en.lproj/Localizable.strings
+├── Tests/ClaudeUsageBarTests/
+├── Resources/                       # App bundle resources (not SwiftPM)
+│   ├── Info.plist
+│   ├── Assets.xcassets/             # App icon
+│   ├── dmg/                         # Disk image background
+│   └── claude-logo.svg              # Source SVG for the menu bar logo
+├── scripts/
+│   ├── build.sh                     # Build, bundle, codesign, ZIP and DMG
+│   ├── verify-release.sh            # Checks a packaged ZIP or DMG
+│   └── generate-logo-png.swift      # Regenerates the logo PNG from the SVG
+└── Package.swift
+
+scripts/
+└── mock-server.py                   # Local mock API for development
+```
 
 ## Publishing releases
 
@@ -131,7 +166,7 @@ Available scenarios:
 
 1. Fork the repo and create a branch from `main`
 2. Keep PRs focused — one feature or fix per PR
-3. Test your changes with the mock server when relevant
+3. Run `cd macos && swift test`, and test with the mock server when relevant
 4. Make sure `make app` builds without errors
 5. Open a pull request against `main`
 

@@ -13,160 +13,87 @@ Now it's just a glimpse away — always sitting at the top of your screen.
 </p>
 
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue)
-![Swift 5.9](https://img.shields.io/badge/Swift-5.9-orange)
 ![License](https://img.shields.io/badge/license-BSD--2--Clause-green)
 
 ## What it does
 
-A tiny macOS menu bar app that shows your Claude API usage at a glance. Click it for the full picture:
+A small macOS menu bar app that shows how much of your Claude plan's usage limits you've used.
 
-- Menu bar icon with a mini dual-bar showing 5-hour and 7-day utilization
-- Detailed popover with per-window usage, per-model breakdown, and reset timers
-- Extra usage tracking with USD currency display
-- Usage history chart — see how your usage evolves over time (1h / 6h / 1d / 7d / 30d)
-- Hover over the chart to see exact values at any point
-- Configurable polling interval (5m / 15m / 30m / 1h)
-- Built-in update checks via Sparkle
-- Just sign in — OAuth via browser, no API keys to manage
-- Minimal dependencies — SwiftUI, Swift Charts, Foundation, and Sparkle for updates
+- A menu bar icon with two mini bars for your 5-hour and 7-day limits
+- A popover with each limit's usage and reset time, a per-model breakdown when your plan has one, and extra usage in USD
+- A usage history chart from the last hour to the last 30 days; hover it for exact values
+- Notifications when a limit passes a percentage you choose
+- Launch at login, and a choice of how often to refresh (every 5 minutes to every hour)
+- Sign in with your Claude account in the browser; no API key needed
+- Updates itself
 
 ## Install
 
-### Download
+1. Download `ClaudeUsageBar.dmg` from the [latest release](https://github.com/Blimp-Labs/claude-usage-bar/releases/latest).
+2. Open it and drag **ClaudeUsageBar** into **Applications**.
+3. Open the app from **Applications**. It runs from the disk image too, but can't update itself there.
 
-1. Download `ClaudeUsageBar.dmg` from the [latest release](https://github.com/Blimp-Labs/claude-usage-bar/releases/latest)
-2. Open the disk image and drag `ClaudeUsageBar.app` into `Applications`
-3. Launch the app from `/Applications`
-4. macOS may require right-click → **Open** on first launch
+The app isn't notarized by Apple, so macOS blocks the first launch:
 
-### Build from source
+- **macOS 15 and later:** after the warning, open **System Settings → Privacy & Security**, scroll to **Security**, click **Open Anyway**, and confirm with your password. The button appears for about an hour after the blocked launch.
+- **macOS 14:** Control-click the app in Applications, choose **Open**, then **Open** again.
 
-Requires Xcode 15+ / Swift 5.9+ and macOS 14 (Sonoma) or later. Packaging a release (`make zip`, `make dmg`) needs Xcode 26+, because the release check requires the macOS 26 SDK.
-
-```sh
-git clone https://github.com/Blimp-Labs/claude-usage-bar.git
-cd claude-usage-bar
-make app            # build .app bundle
-make dmg            # build drag-to-Applications disk image
-make install        # copy to /Applications
-```
+You only do this once. Updates install without the warning.
 
 ## Usage
 
-1. Launch the app — a menu bar icon appears
-2. Click the icon → **Sign in with Claude** → authorize in your browser
-3. Paste the code back into the app
-4. The icon updates automatically (default: every 30 minutes)
-5. Release builds show **Check for Updates…** in the popover so you can pull newer versions without re-downloading manually
+1. Click the menu bar icon, then **Sign in with Claude**.
+2. Approve access in your browser, copy the code it shows, and paste it into the app.
+3. The icon now shows your usage and refreshes every 30 minutes by default.
 
-Click the icon anytime to see:
-- 5-hour and 7-day usage with progress bars and reset timers
-- Per-model breakdown (Opus / Sonnet) when available
-- Extra usage credits and limits
-- Usage history chart with adjustable time range and hover details
+Click the icon any time for the details. **Settings…** in the popover has:
 
-## Data storage
+- **General:** launch at login, and how often to refresh
+- **Notifications:** an alert threshold for the 5-hour, 7-day and extra-usage limits, or **Off**
+- **Account:** the signed-in account, and **Sign Out**
+- **Updates:** your version, the daily update check, and **Check for Updates…**
 
-All data is stored locally in `~/.config/claude-usage-bar/`:
+## Updates
 
-| File | Purpose |
-|------|---------|
-| `token` | OAuth access token (permissions: `0600`) |
-| `history.json` | Usage history for the chart (30-day retention) |
+The app checks for a new version once a day and asks before installing it. Turn the daily check off, or check right away, in **Settings → Updates**.
 
-History is buffered in memory and flushed to disk every 5 minutes and on app quit. No data is sent anywhere other than the Anthropic API.
+## Privacy & data
 
-## Development
+Your data stays on your Mac, in `~/.config/claude-usage-bar/`:
 
-```sh
-make build          # release build only
-make app            # build + create .app bundle
-make zip            # build + bundle + zip + verify distribution artifact
-make dmg            # build + bundle + DMG + verify distribution artifact
-make release-artifacts  # build once, then create and verify both ZIP and DMG
-make verify-release # inspect the packaged ZIP and DMG artifacts
-make install        # build + install to /Applications
-make clean          # remove build artifacts
-```
+| File | Contents |
+|------|----------|
+| `credentials.json` | Your sign-in tokens, readable only by you |
+| `history.json` | Usage history for the chart, kept for 30 days, readable only by you |
 
-## Publishing updates
+If Claude Code is installed, the app also reads your account email from `~/.claude.json` to show which account is signed in.
 
-This repo now uses a tag-driven release flow. Pushing a `v*` tag will:
+The app only connects to:
 
-- build the `.app` bundle once
-- produce `ClaudeUsageBar.zip` for Sparkle and `ClaudeUsageBar.dmg` for manual installs
-- verify the packaged artifacts contain the expected app bundle resources and updater framework
-- create the GitHub Release
-- reuse GitHub-generated release notes for both the GitHub Release and the Sparkle update entry
-- generate a signed Sparkle `appcast.xml` from that exact zip
-- deploy the appcast to GitHub Pages
+- `claude.ai` and `platform.claude.com`, to sign you in
+- `api.anthropic.com`, to read your usage and account email
+- `blimp-labs.github.io`, to check for updates, and GitHub's release downloads, to fetch them
 
-Publishing a release is just:
+**Settings → Account → Sign Out** deletes your saved tokens.
 
-```sh
-git tag v0.0.5
-git push origin v0.0.5
-```
+## Uninstall
 
-One-time repo setup:
+1. Turn off **Launch at login** in Settings, then click **Quit** in the popover.
+2. Delete **ClaudeUsageBar** from Applications.
+3. To remove your data and settings too:
 
-1. Enable GitHub Pages and set the source to `GitHub Actions`.
-2. Add a repository Actions secret named `SPARKLE_PRIVATE_KEY`.
+   ```sh
+   rm -rf ~/.config/claude-usage-bar
+   defaults delete com.local.ClaudeUsageBar
+   ```
 
-Local source builds intentionally ship with Sparkle disabled unless `SU_FEED_URL` is injected during packaging. This prevents forks and local builds from auto-updating to upstream binaries.
+## Build from source
 
-Manual installs should prefer the DMG. The ZIP remains the source of truth for Sparkle updates and appcast generation.
-
-You can export the current Sparkle private key from your local Keychain with:
-
-```sh
-macos/.build/artifacts/sparkle/Sparkle/bin/generate_keys --account claude-usage-bar -x /tmp/claude-usage-bar.sparkle.key
-gh secret set SPARKLE_PRIVATE_KEY < /tmp/claude-usage-bar.sparkle.key
-```
-
-The appcast feed URL used by release builds is:
-
-```text
-https://blimp-labs.github.io/claude-usage-bar/appcast.xml
-```
-
-### Project structure
-
-```
-macos/                           # macOS menu bar app (Swift/SwiftUI)
-├── Sources/ClaudeUsageBar/
-│   ├── ClaudeUsageBarApp.swift      # App entry point, menu bar setup
-│   ├── UsageService.swift           # OAuth, polling, API calls
-│   ├── UsageModel.swift             # API response types
-│   ├── UsageHistoryModel.swift      # History data types, time ranges
-│   ├── UsageHistoryService.swift    # Persistence, downsampling
-│   ├── UsageChartView.swift         # Swift Charts trajectory view
-│   ├── PopoverView.swift            # Main popover UI
-│   ├── SettingsView.swift           # Settings window
-│   ├── NotificationService.swift    # Usage threshold notifications
-│   ├── MenuBarIconRenderer.swift    # Menu bar icon drawing
-│   ├── PollingOptionFormatter.swift # Polling interval display labels
-│   ├── AppUpdater.swift             # Sparkle update integration
-│   └── Resources/
-│       ├── claude-logo.png          # Pre-rendered menu bar logo (512px)
-│       └── en.lproj/Localizable.strings
-├── Tests/ClaudeUsageBarTests/
-├── Resources/                       # App bundle resources (not SwiftPM)
-│   ├── Info.plist
-│   ├── Assets.xcassets/             # App icon
-│   └── claude-logo.svg             # Source SVG for menu bar logo
-├── scripts/
-│   ├── build.sh                     # Build + bundle + codesign
-│   └── generate-logo-png.swift      # Regenerate logo PNG from SVG
-└── Package.swift
-
-scripts/                         # Shared tooling
-└── mock-server.py               # Local mock API for development
-```
+Clone the repo and run `make install` to build the app and copy it to Applications. Builds made this way don't update themselves; see [CONTRIBUTING.md](CONTRIBUTING.md) for requirements and details.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing with the mock server, and submission guidelines.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing, and how to submit changes.
 
 ## License
 
