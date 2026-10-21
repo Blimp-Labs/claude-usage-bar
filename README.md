@@ -43,8 +43,10 @@ You only do this once. Updates install without the warning.
 ## Usage
 
 1. Click the menu bar icon, then **Sign in with Claude**.
-2. Approve access in your browser, copy the code it shows, and paste it into the app.
+2. Approve access in your browser. The app finishes signing in on its own.
 3. The icon now shows your usage and refreshes every 30 minutes by default.
+
+If the browser can't hand the sign-in back to the app, click **Paste a code instead** and paste the code the page shows.
 
 Click the icon any time for the details. **Settings…** in the popover has:
 
@@ -73,6 +75,8 @@ The app only connects to:
 - `claude.ai` and `platform.claude.com`, to sign you in
 - `api.anthropic.com`, to read your usage and account email
 - `blimp-labs.github.io`, to check for updates, and GitHub's release downloads, to fetch them
+
+While you sign in, it also listens on `127.0.0.1`, reachable only from your Mac, for the browser to hand back the sign-in.
 
 **Settings → Account → Sign Out** deletes your saved tokens.
 

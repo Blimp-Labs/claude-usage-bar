@@ -672,17 +672,9 @@ final class UsageServiceTests: XCTestCase {
             XCTFail("No network request should be made when state is missing")
             return try Self.httpResponse(url: request.url!, statusCode: 500)
         }
+        let service = makeOAuthService(store: try makeStore(), listener: false)
 
-        let service = UsageService(
-            session: makeSession(),
-            usageEndpoint: URL(string: "https://example.com/api/oauth/usage")!,
-            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
-            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
-            credentialsStore: try makeStore(),
-            urlOpener: { _ in true }
-        )
-
-        service.startOAuthFlow()
+        await service.startOAuthFlow()
         XCTAssertTrue(service.isAwaitingCode)
 
         await service.submitOAuthCode("some-auth-code")
@@ -696,61 +688,14 @@ final class UsageServiceTests: XCTestCase {
         let store = try makeStore()
         var openedURL: URL?
         var tokenRequestBody: [String: String]?
-
-        MockURLProtocol.handler = { request in
-            switch (request.httpMethod, request.url?.path) {
-            case ("POST", "/v1/oauth/token"):
-                tokenRequestBody = Self.jsonBody(for: request)
-                return try Self.httpResponse(
-                    url: request.url!,
-                    statusCode: 200,
-                    body: """
-                    {
-                      "access_token": "signed-in-access",
-                      "refresh_token": "signed-in-refresh",
-                      "expires_in": 3600,
-                      "scope": "user:profile user:inference"
-                    }
-                    """
-                )
-            case ("GET", "/api/oauth/usage"):
-                return try Self.httpResponse(
-                    url: request.url!,
-                    statusCode: 200,
-                    body: """
-                    {
-                      "five_hour": { "utilization": 12, "resets_at": "2026-03-08T18:00:00Z" },
-                      "seven_day": { "utilization": 20, "resets_at": "2026-03-15T18:00:00Z" }
-                    }
-                    """
-                )
-            default:
-                XCTFail("Unexpected request: \(request)")
-                return try Self.httpResponse(url: request.url!, statusCode: 500)
-            }
-        }
-
-        let service = UsageService(
-            session: makeSession(),
-            usageEndpoint: URL(string: "https://example.com/api/oauth/usage")!,
-            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
-            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
-            credentialsStore: store,
-            localProfileLoader: { "user@example.com" },
-            urlOpener: { url in
-                openedURL = url
-                return true
-            }
-        )
+        MockURLProtocol.handler = Self.signInHandler { tokenRequestBody = $0 }
+        let service = makeOAuthService(store: store, listener: false) { openedURL = $0 }
         // Sign-in starts polling; stop it so it can't reach a later test's handler.
         defer { service.signOut() }
 
-        service.startOAuthFlow()
-        let query = try XCTUnwrap(
-            openedURL.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems }
-        )
-        let state = try XCTUnwrap(query.first { $0.name == "state" }?.value)
-        let challenge = try XCTUnwrap(query.first { $0.name == "code_challenge" }?.value)
+        await service.startOAuthFlow()
+        let query = try queryItems(of: openedURL)
+        let state = try XCTUnwrap(query["state"])
 
         await service.submitOAuthCode("auth-code#\(state)")
 
@@ -762,9 +707,9 @@ final class UsageServiceTests: XCTestCase {
         XCTAssertEqual(body["grant_type"], "authorization_code")
         XCTAssertEqual(body["code"], "auth-code")
         XCTAssertEqual(body["state"], state)
-        XCTAssertEqual(body["redirect_uri"], query.first { $0.name == "redirect_uri" }?.value)
+        XCTAssertEqual(body["redirect_uri"], query["redirect_uri"])
         let verifier = try XCTUnwrap(body["code_verifier"])
-        XCTAssertEqual(Data(SHA256.hash(data: Data(verifier.utf8))).base64URLEncoded(), challenge)
+        XCTAssertEqual(Data(SHA256.hash(data: Data(verifier.utf8))).base64URLEncoded(), query["code_challenge"])
 
         let saved = try XCTUnwrap(store.load(defaultScopes: UsageService.defaultOAuthScopes))
         XCTAssertEqual(saved.accessToken, "signed-in-access")
@@ -775,17 +720,9 @@ final class UsageServiceTests: XCTestCase {
             XCTFail("No network request should be made when state doesn't match")
             return try Self.httpResponse(url: request.url!, statusCode: 500)
         }
+        let service = makeOAuthService(store: try makeStore(), listener: false)
 
-        let service = UsageService(
-            session: makeSession(),
-            usageEndpoint: URL(string: "https://example.com/api/oauth/usage")!,
-            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
-            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
-            credentialsStore: try makeStore(),
-            urlOpener: { _ in true }
-        )
-
-        service.startOAuthFlow()
+        await service.startOAuthFlow()
         await service.submitOAuthCode("auth-code#not-the-state")
 
         XCTAssertFalse(service.isAuthenticated)
@@ -793,7 +730,103 @@ final class UsageServiceTests: XCTestCase {
         XCTAssertEqual(service.lastError, "OAuth state mismatch — try again")
     }
 
-    func testStartOAuthFlowFailsCleanlyWhenBrowserCannotOpen() throws {
+    // MARK: - Browser sign-in through the local listener
+
+    func testBrowserCallbackSignsInThroughTheLocalListener() async throws {
+        let store = try makeStore()
+        var openedURL: URL?
+        var tokenRequestBody: [String: String]?
+        MockURLProtocol.handler = Self.signInHandler { tokenRequestBody = $0 }
+        let service = makeOAuthService(store: store) { openedURL = $0 }
+        defer { service.signOut() }
+
+        await service.startOAuthFlow()
+        XCTAssertTrue(service.isWaitingForBrowser)
+        let query = try queryItems(of: openedURL)
+        let redirectURI = try XCTUnwrap(query["redirect_uri"])
+        let state = try XCTUnwrap(query["state"])
+        XCTAssertTrue(redirectURI.hasPrefix("http://localhost:"))
+
+        let response = try await browserGet("\(redirectURI)?code=auth-code&state=\(state)")
+
+        XCTAssertEqual(response.status, 200)
+        XCTAssertTrue(response.page.contains("signed in"))
+        XCTAssertTrue(service.isAuthenticated)
+        XCTAssertFalse(service.isAwaitingCode)
+        let body = try XCTUnwrap(tokenRequestBody)
+        XCTAssertEqual(body["code"], "auth-code")
+        XCTAssertEqual(body["state"], state)
+        XCTAssertEqual(body["redirect_uri"], redirectURI)
+        XCTAssertEqual(try store.load(defaultScopes: UsageService.defaultOAuthScopes)?.accessToken, "signed-in-access")
+    }
+
+    func testListenerIgnoresRequestsThatArentThisSignInsCallback() async throws {
+        MockURLProtocol.handler = { request in
+            XCTFail("No token request expected: \(request)")
+            return try Self.httpResponse(url: request.url!, statusCode: 500)
+        }
+        var openedURL: URL?
+        let service = makeOAuthService(store: try makeStore()) { openedURL = $0 }
+        defer { service.endOAuthFlow() }
+
+        await service.startOAuthFlow()
+        let redirectURI = try XCTUnwrap(queryItems(of: openedURL)["redirect_uri"])
+
+        let favicon = try await browserGet(redirectURI.replacingOccurrences(of: "/callback", with: "/favicon.ico"))
+        let wrongState = try await browserGet("\(redirectURI)?code=auth-code&state=not-the-state")
+
+        XCTAssertEqual(favicon.status, 404)
+        XCTAssertEqual(wrongState.status, 400)
+        XCTAssertTrue(service.isWaitingForBrowser)
+    }
+
+    func testCancelingInTheBrowserEndsTheSignIn() async throws {
+        var openedURL: URL?
+        let service = makeOAuthService(store: try makeStore()) { openedURL = $0 }
+
+        await service.startOAuthFlow()
+        let query = try queryItems(of: openedURL)
+        let redirectURI = try XCTUnwrap(query["redirect_uri"])
+        let state = try XCTUnwrap(query["state"])
+
+        let response = try await browserGet("\(redirectURI)?error=access_denied&state=\(state)")
+
+        XCTAssertEqual(response.status, 200)
+        XCTAssertTrue(response.page.contains("canceled"))
+        XCTAssertFalse(service.isAwaitingCode)
+        XCTAssertEqual(service.lastError, "Sign-in was canceled in the browser")
+    }
+
+    func testPastingACodeInsteadOpensTheManualSignInWithTheSameState() async throws {
+        var openedURLs: [URL] = []
+        let service = makeOAuthService(store: try makeStore()) { openedURLs.append($0) }
+        defer { service.endOAuthFlow() }
+
+        await service.startOAuthFlow()
+        service.switchToPastedCode()
+
+        XCTAssertTrue(service.isAwaitingCode)
+        XCTAssertFalse(service.isWaitingForBrowser)
+        XCTAssertEqual(openedURLs.count, 2)
+        let automatic = try queryItems(of: openedURLs.first)
+        let manual = try queryItems(of: openedURLs.last)
+        XCTAssertEqual(manual["redirect_uri"], "https://platform.claude.com/oauth/code/callback")
+        XCTAssertEqual(manual["state"], automatic["state"])
+        XCTAssertEqual(manual["code_challenge"], automatic["code_challenge"])
+    }
+
+    func testSignInFallsBackToPastingWhenTheListenerCantStart() async throws {
+        var openedURL: URL?
+        let service = makeOAuthService(store: try makeStore(), listener: false) { openedURL = $0 }
+
+        await service.startOAuthFlow()
+
+        XCTAssertTrue(service.isAwaitingCode)
+        XCTAssertFalse(service.isWaitingForBrowser)
+        XCTAssertEqual(try queryItems(of: openedURL)["redirect_uri"], "https://platform.claude.com/oauth/code/callback")
+    }
+
+    func testStartOAuthFlowFailsCleanlyWhenBrowserCannotOpen() async throws {
         var openedURL: URL?
 
         let service = UsageService(
@@ -805,14 +838,73 @@ final class UsageServiceTests: XCTestCase {
             urlOpener: { url in
                 openedURL = url
                 return false
-            }
+            },
+            startCallbackListener: { _ in nil }
         )
 
-        service.startOAuthFlow()
+        await service.startOAuthFlow()
 
         XCTAssertTrue(openedURL?.absoluteString.hasPrefix("https://claude.ai/oauth/authorize") == true)
         XCTAssertFalse(service.isAwaitingCode)
         XCTAssertEqual(service.lastError, "Could not open Claude sign-in page")
+    }
+
+    private func makeOAuthService(
+        store: StoredCredentialsStore,
+        listener: Bool = true,
+        opened: @escaping (URL) -> Void = { _ in }
+    ) -> UsageService {
+        let startListener: (@escaping OAuthCallbackListener.Handler) async -> OAuthCallbackListener? = listener
+            ? { try? await OAuthCallbackListener.start(handler: $0) }
+            : { _ in nil }
+        return UsageService(
+            session: makeSession(),
+            usageEndpoint: URL(string: "https://example.com/api/oauth/usage")!,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
+            credentialsStore: store,
+            localProfileLoader: { "user@example.com" },
+            urlOpener: { url in
+                opened(url)
+                return true
+            },
+            startCallbackListener: startListener
+        )
+    }
+
+    private func queryItems(of url: URL?) throws -> [String: String] {
+        let items = try XCTUnwrap(url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems })
+        return Dictionary(items.map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { first, _ in first })
+    }
+
+    /// Stands in for the browser following the sign-in redirect to the local listener.
+    private func browserGet(_ url: String) async throws -> (status: Int, page: String) {
+        let (data, response) = try await URLSession(configuration: .ephemeral).data(from: try XCTUnwrap(URL(string: url)))
+        return (try XCTUnwrap(response as? HTTPURLResponse).statusCode, String(decoding: data, as: UTF8.self))
+    }
+
+    /// Serves a successful token exchange and the usage fetch that follows sign-in.
+    private static func signInHandler(
+        onTokenRequest: @escaping ([String: String]?) -> Void
+    ) -> (URLRequest) throws -> (HTTPURLResponse, Data) {
+        { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("POST", "/v1/oauth/token"):
+                onTokenRequest(jsonBody(for: request))
+                return try httpResponse(url: request.url!, statusCode: 200, body: """
+                {"access_token": "signed-in-access", "refresh_token": "signed-in-refresh", \
+                "expires_in": 3600, "scope": "user:profile user:inference"}
+                """)
+            case ("GET", "/api/oauth/usage"):
+                return try httpResponse(url: request.url!, statusCode: 200, body: """
+                {"five_hour": {"utilization": 12, "resets_at": "2026-03-08T18:00:00Z"}, \
+                "seven_day": {"utilization": 20, "resets_at": "2026-03-15T18:00:00Z"}}
+                """)
+            default:
+                XCTFail("Unexpected request: \(request)")
+                return try httpResponse(url: request.url!, statusCode: 500)
+            }
+        }
     }
 
     private func makeStore() throws -> StoredCredentialsStore {
