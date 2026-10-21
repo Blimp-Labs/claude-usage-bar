@@ -166,8 +166,6 @@ class UsageService: ObservableObject {
     // MARK: - OAuth PKCE Flow
 
     func startOAuthFlow() {
-        // Otherwise a failed open leaves its error under the code-entry field
-        // for the whole of the next attempt.
         lastError = nil
 
         let verifier = generateCodeVerifier()
@@ -211,7 +209,6 @@ class UsageService: ObservableObject {
             return
         }
 
-        // State validation is mandatory when an OAuth flow is pending
         if oauthState != nil {
             guard parts.count > 1 else {
                 lastError = "Missing OAuth state — expected code#state format"

@@ -77,8 +77,7 @@ class UsageHistoryService: ObservableObject {
 
         guard let data = try? JSONEncoder.historyEncoder.encode(history) else { return }
         let url = historyFileURL
-        // Resolved once at init, so recreate it here — this app runs for weeks
-        // and a directory that vanishes would otherwise end writes silently.
+        // The directory may have been deleted since launch.
         try? FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -91,10 +90,7 @@ class UsageHistoryService: ObservableObject {
             attributes: [.posixPermissions: 0o600]
         ) else { return }
         do {
-            // .usingNewMetadataOnly matters on the upgrade path: without it
-            // replaceItemAt keeps the ORIGINAL file's metadata, so a
-            // history.json already on disk at 0644 stays 0644 forever and only
-            // fresh installs get the tighter permissions.
+            // Without .usingNewMetadataOnly, replaceItemAt keeps an existing file's 0644 mode.
             _ = try FileManager.default.replaceItemAt(
                 url,
                 withItemAt: tempURL,

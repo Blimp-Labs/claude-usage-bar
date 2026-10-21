@@ -65,9 +65,6 @@ class NotificationService: ObservableObject {
     private var previousPct7d: Double?
     private var previousPctExtra: Double?
     private let delegate = NotificationDelegate()
-
-    /// False when this process cannot use notifications at all, so callers can
-    /// say so instead of silently doing nothing.
     let isAvailable = supportsUserNotifications()
 
     init() {
@@ -101,10 +98,7 @@ class NotificationService: ObservableObject {
     }
 
     func requestPermission() {
-        guard isAvailable else {
-            print("[Notification] Permission not requested — no app bundle")
-            return
-        }
+        guard isAvailable else { return }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
@@ -176,27 +170,12 @@ class NotificationService: ObservableObject {
     }
 }
 
-/// Shown wherever notification controls are offered but cannot work. Only
-/// reachable in development — a packaged build always declares APPL.
+/// Dev-only: packaged builds always declare APPL.
 let notificationsUnavailableMessage =
     "Notifications require a packaged application build — run `make app` and launch the bundle."
 
-/// Whether this process can use `UNUserNotificationCenter` at all.
-///
-/// `UNUserNotificationCenter.current()` aborts the process rather than
-/// returning nil when it is unhappy, and Apple exposes no availability check,
-/// so this is a deliberately conservative heuristic rather than a documented
-/// test. The precise precondition it enforces is not public — a nil
-/// `LSBundleProxy` alone does not trigger the abort — so this errs toward the
-/// configurations known to work.
-///
-/// `CFBundlePackageType` is the key that declares a bundle's type.
-/// `object(forInfoDictionaryKey:)` reads it strictly — a `.app` that omits the
-/// key returns nil rather than falling back to the path extension — so this
-/// depends on nothing but the declaration itself. That gets renamed, symlinked
-/// and oddly-cased bundles right, and excludes app extensions (which declare
-/// `XPC!`) for free. Under `swift test` and `swift run` there is no such key,
-/// which is exactly the case that used to abort.
+/// `UNUserNotificationCenter.current()` aborts outside a real app (e.g. `swift test`/`swift run`) and
+/// there is no availability API, so require a declared `APPL` type (renamed bundles OK, `.appex` excluded).
 func supportsUserNotifications(bundle: Bundle = .main) -> Bool {
     bundle.object(forInfoDictionaryKey: "CFBundlePackageType") as? String == "APPL"
 }
