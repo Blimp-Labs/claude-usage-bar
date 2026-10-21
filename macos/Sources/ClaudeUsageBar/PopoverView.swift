@@ -31,7 +31,9 @@ struct PopoverView: View {
 
     @ViewBuilder
     private var signInView: some View {
-        if service.isAwaitingCode {
+        if service.isWaitingForBrowser {
+            BrowserSignInView(service: service)
+        } else if service.isAwaitingCode {
             CodeEntryView(service: service)
         } else {
             Text("Sign in to view your usage.")
@@ -39,7 +41,7 @@ struct PopoverView: View {
                 .foregroundStyle(.secondary)
 
             Button("Sign in with Claude") {
-                service.startOAuthFlow()
+                Task { await service.startOAuthFlow() }
             }
             .buttonStyle(.borderedProminent)
             .frame(maxWidth: .infinity)
@@ -257,6 +259,28 @@ private struct SetupView: View {
 
 // MARK: - Subviews
 
+private struct BrowserSignInView: View {
+    @ObservedObject var service: UsageService
+
+    var body: some View {
+        Text("Approve access in your browser to finish signing in.")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+
+        HStack {
+            Button("Cancel") {
+                service.endOAuthFlow()
+            }
+            .buttonStyle(.borderless)
+            Spacer()
+            Button("Paste a code instead") {
+                service.switchToPastedCode()
+            }
+            .buttonStyle(.borderless)
+        }
+    }
+}
+
 private struct CodeEntryView: View {
     @ObservedObject var service: UsageService
     @State private var code = ""
@@ -283,7 +307,7 @@ private struct CodeEntryView: View {
 
         HStack {
             Button("Cancel") {
-                service.isAwaitingCode = false
+                service.endOAuthFlow()
             }
             .buttonStyle(.borderless)
             Spacer()

@@ -8,7 +8,8 @@ class UsageService: ObservableObject {
     @Published var lastError: String?
     @Published var lastUpdated: Date?
     @Published var isAuthenticated = false
-    @Published var isAwaitingCode = false
+    @Published private(set) var isAwaitingCode = false
+    @Published private(set) var isWaitingForBrowser = false
     @Published private(set) var accountEmail: String?
 
     var historyService: UsageHistoryService?
@@ -22,6 +23,8 @@ class UsageService: ObservableObject {
     private let credentialsStore: StoredCredentialsStore
     private let localProfileLoader: @MainActor () -> String?
     private let urlOpener: @MainActor (URL) -> Bool
+    private let startCallbackListener: (@escaping OAuthCallbackListener.Handler) async -> OAuthCallbackListener?
+    private var callbackListener: OAuthCallbackListener?
     private var currentInterval: TimeInterval
     private enum RefreshResult {
         case success
@@ -123,7 +126,10 @@ class UsageService: ObservableObject {
         redirectUri: String = UsageService.defaultRedirectURI,
         credentialsStore: StoredCredentialsStore = StoredCredentialsStore(),
         localProfileLoader: @MainActor @escaping () -> String? = UsageService.loadLocalProfile,
-        urlOpener: @MainActor @escaping (URL) -> Bool = { NSWorkspace.shared.open($0) }
+        urlOpener: @MainActor @escaping (URL) -> Bool = { NSWorkspace.shared.open($0) },
+        startCallbackListener: @escaping (@escaping OAuthCallbackListener.Handler) async -> OAuthCallbackListener? = {
+            try? await OAuthCallbackListener.start(handler: $0)
+        }
     ) {
         self.session = session
         self.usageEndpoint = usageEndpoint
@@ -133,6 +139,7 @@ class UsageService: ObservableObject {
         self.credentialsStore = credentialsStore
         self.localProfileLoader = localProfileLoader
         self.urlOpener = urlOpener
+        self.startCallbackListener = startCallbackListener
         let stored = UserDefaults.standard.integer(forKey: "pollingMinutes")
         let minutes = Self.pollingOptions.contains(stored) ? stored : Self.defaultPollingMinutes
         self.pollingMinutes = minutes
@@ -165,38 +172,55 @@ class UsageService: ObservableObject {
 
     // MARK: - OAuth PKCE Flow
 
-    func startOAuthFlow() {
+    func startOAuthFlow() async {
+        endOAuthFlow()
         lastError = nil
 
         let verifier = generateCodeVerifier()
-        let challenge = generateCodeChallenge(from: verifier)
         let state = generateCodeVerifier() // random state
-
         codeVerifier = verifier
         oauthState = state
 
-        var components = URLComponents(url: Self.authorizeEndpoint, resolvingAgainstBaseURL: false)!
-        components.queryItems = [
-            URLQueryItem(name: "code", value: "true"),
-            URLQueryItem(name: "client_id", value: clientId),
-            URLQueryItem(name: "response_type", value: "code"),
-            URLQueryItem(name: "redirect_uri", value: redirectUri),
-            URLQueryItem(name: "scope", value: Self.defaultOAuthScopes.joined(separator: " ")),
-            URLQueryItem(name: "code_challenge", value: challenge),
-            URLQueryItem(name: "code_challenge_method", value: "S256"),
-            URLQueryItem(name: "state", value: state),
-        ]
-
-        if let url = components.url {
-            guard urlOpener(url) else {
-                codeVerifier = nil
-                oauthState = nil
-                isAwaitingCode = false
-                lastError = "Could not open Claude sign-in page"
-                return
-            }
-            isAwaitingCode = true
+        // Like Claude Code, the browser hands the code back to a listener on
+        // 127.0.0.1. Without one, the user pastes the code instead.
+        let listener = await startCallbackListener { [weak self] query in
+            guard let self else { return (400, Self.browserPage("This sign-in has ended.")) }
+            return await self.handleBrowserCallback(query)
         }
+        guard oauthState == state else {
+            // A newer sign-in started while this listener was starting.
+            listener?.stop()
+            return
+        }
+        callbackListener = listener
+
+        let redirectURI = listener?.redirectURI ?? redirectUri
+        guard urlOpener(authorizeURL(verifier: verifier, state: state, redirectURI: redirectURI)) else {
+            endOAuthFlow()
+            lastError = "Could not open Claude sign-in page"
+            return
+        }
+        isWaitingForBrowser = listener != nil
+        isAwaitingCode = true
+    }
+
+    /// Falls back to pasting a code, for when the browser can't reach the listener.
+    func switchToPastedCode() {
+        guard let verifier = codeVerifier, let state = oauthState else { return }
+        guard urlOpener(authorizeURL(verifier: verifier, state: state, redirectURI: redirectUri)) else {
+            lastError = "Could not open Claude sign-in page"
+            return
+        }
+        isWaitingForBrowser = false
+    }
+
+    func endOAuthFlow() {
+        callbackListener?.stop()
+        callbackListener = nil
+        codeVerifier = nil
+        oauthState = nil
+        isAwaitingCode = false
+        isWaitingForBrowser = false
     }
 
     func submitOAuthCode(_ rawCode: String) async {
@@ -211,29 +235,58 @@ class UsageService: ObservableObject {
 
         if oauthState != nil {
             guard parts.count > 1 else {
+                endOAuthFlow()
                 lastError = "Missing OAuth state — expected code#state format"
-                isAwaitingCode = false
-                codeVerifier = nil
-                oauthState = nil
                 return
             }
             let returnedState = String(parts[1])
             guard returnedState == oauthState else {
+                endOAuthFlow()
                 lastError = "OAuth state mismatch — try again"
-                isAwaitingCode = false
-                codeVerifier = nil
-                oauthState = nil
                 return
             }
         }
 
-        guard let verifier = codeVerifier else {
+        guard let verifier = codeVerifier, let state = oauthState else {
             lastError = "No pending OAuth flow"
             isAwaitingCode = false
             return
         }
 
-        // Exchange code for token
+        await exchangeCode(code, state: state, verifier: verifier, redirectURI: redirectUri)
+    }
+
+    /// Answers the browser's redirect to the listener, and returns the page it shows.
+    func handleBrowserCallback(_ query: [URLQueryItem]) async -> (status: Int, html: String) {
+        func value(_ name: String) -> String? { query.first { $0.name == name }?.value }
+
+        // Anything without this sign-in's state is ignored rather than ending it.
+        guard let state = oauthState, value("state") == state,
+              let verifier = codeVerifier, let redirectURI = callbackListener?.redirectURI else {
+            return (400, Self.browserPage("Invalid state parameter."))
+        }
+        guard let code = value("code"), !code.isEmpty else {
+            guard value("error") != nil else {
+                return (400, Self.browserPage("No authorization code received."))
+            }
+            endOAuthFlow()
+            lastError = "Sign-in was canceled in the browser"
+            return (200, Self.browserPage("Sign-in was canceled. You can close this tab."))
+        }
+
+        // The code only works once, so claim this sign-in before exchanging it.
+        oauthState = nil
+        guard await exchangeCode(code, state: state, verifier: verifier, redirectURI: redirectURI) else {
+            endOAuthFlow()
+            return (200, Self.browserPage(
+                "Sign-in didn't finish: \(lastError ?? "unknown error"). Go back to Claude Usage Bar and try again."
+            ))
+        }
+        return (200, Self.browserPage("You're signed in to Claude Usage Bar. You can close this tab."))
+    }
+
+    @discardableResult
+    private func exchangeCode(_ code: String, state: String, verifier: String, redirectURI: String) async -> Bool {
         var request = URLRequest(url: tokenEndpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -241,9 +294,9 @@ class UsageService: ObservableObject {
         let body: [String: String] = [
             "grant_type": "authorization_code",
             "code": code,
-            "state": oauthState ?? "",
+            "state": state,
             "client_id": clientId,
-            "redirect_uri": redirectUri,
+            "redirect_uri": redirectURI,
             "code_verifier": verifier,
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
@@ -252,37 +305,63 @@ class UsageService: ObservableObject {
             let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse else {
                 lastError = "Invalid token response"
-                return
+                return false
             }
             guard http.statusCode == 200 else {
                 let bodyStr = String(data: data, encoding: .utf8) ?? ""
                 lastError = "Token exchange failed: HTTP \(http.statusCode) \(bodyStr)"
-                return
+                return false
             }
 
             guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let credentials = credentials(from: json) else {
                 lastError = "Could not parse token response"
-                return
+                return false
             }
 
             do {
                 try saveCredentials(credentials)
             } catch {
                 lastError = "Failed to save credentials: \(error.localizedDescription)"
-                return
+                return false
             }
             isAuthenticated = true
-            isAwaitingCode = false
             lastError = nil
-            codeVerifier = nil
-            oauthState = nil
+            endOAuthFlow()
 
             await fetchProfile()
             startPolling()
+            return true
         } catch {
             lastError = "Token exchange error: \(error.localizedDescription)"
+            return false
         }
+    }
+
+    private func authorizeURL(verifier: String, state: String, redirectURI: String) -> URL {
+        var components = URLComponents(url: Self.authorizeEndpoint, resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "code", value: "true"),
+            URLQueryItem(name: "client_id", value: clientId),
+            URLQueryItem(name: "response_type", value: "code"),
+            URLQueryItem(name: "redirect_uri", value: redirectURI),
+            URLQueryItem(name: "scope", value: Self.defaultOAuthScopes.joined(separator: " ")),
+            URLQueryItem(name: "code_challenge", value: generateCodeChallenge(from: verifier)),
+            URLQueryItem(name: "code_challenge_method", value: "S256"),
+            URLQueryItem(name: "state", value: state),
+        ]
+        return components.url!
+    }
+
+    nonisolated private static func browserPage(_ message: String) -> String {
+        let escaped = message
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+        return """
+        <!doctype html><meta charset="utf-8"><title>Claude Usage Bar</title>
+        <body style="font: 15px -apple-system, sans-serif; text-align: center; margin-top: 30vh">\(escaped)</body>
+        """
     }
 
     func signOut() {

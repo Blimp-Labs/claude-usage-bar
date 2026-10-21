@@ -49,6 +49,7 @@ macos/                               # macOS menu bar app (Swift/SwiftUI)
 ├── Sources/ClaudeUsageBar/
 │   ├── ClaudeUsageBarApp.swift      # App entry point, menu bar setup
 │   ├── UsageService.swift           # OAuth, polling, API calls
+│   ├── OAuthCallbackListener.swift  # Receives the browser's sign-in redirect
 │   ├── StoredCredentials.swift      # Saved sign-in tokens
 │   ├── UsageModel.swift             # API response types
 │   ├── UsageHistoryModel.swift      # History data types, time ranges
