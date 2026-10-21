@@ -3,14 +3,14 @@ import Sparkle
 
 /// Separate object: the controller needs its delegate before `self` exists.
 private final class UpdaterDelegate: NSObject, SPUUpdaterDelegate {
-    var onUpdateCycleFinished: ((Error?) -> Void)?
+    var onUpdateCycleFinished: ((SPUUpdateCheck, Error?) -> Void)?
 
     func updater(
         _ updater: SPUUpdater,
         didFinishUpdateCycleFor updateCheck: SPUUpdateCheck,
         error: (any Error)?
     ) {
-        onUpdateCycleFinished?(error)
+        onUpdateCycleFinished?(updateCheck, error)
     }
 }
 
@@ -63,7 +63,8 @@ final class AppUpdater: ObservableObject {
         }
 
         // Sparkle hides scheduled-check errors from the UI; surface them here.
-        delegate.onUpdateCycleFinished = { [weak self] error in
+        delegate.onUpdateCycleFinished = { [weak self] check, error in
+            guard !AppUpdater.isOfflineBackgroundCheck(check, error: error) else { return }
             Task { @MainActor [weak self] in
                 self?.lastError = AppUpdater.describe(error)
             }
@@ -120,5 +121,25 @@ final class AppUpdater: ObservableObject {
         guard let recovery, !recovery.isEmpty else { return message }
 
         return "\(message) \(recovery)"
+    }
+
+    nonisolated private static let offlineCodes: Set<Int> = [
+        NSURLErrorNotConnectedToInternet, NSURLErrorNetworkConnectionLost, NSURLErrorTimedOut,
+        NSURLErrorCannotFindHost, NSURLErrorCannotConnectToHost, NSURLErrorDNSLookupFailed,
+        NSURLErrorInternationalRoamingOff, NSURLErrorDataNotAllowed
+    ]
+
+    /// A scheduled check that couldn't reach the network (e.g. a laptop waking
+    /// before Wi-Fi reconnects) says nothing about the feed.
+    nonisolated static func isOfflineBackgroundCheck(_ check: SPUUpdateCheck, error: Error?) -> Bool {
+        guard check == .updatesInBackground else { return false }
+
+        // Sparkle nests the URL error inside one or more of its own download errors.
+        var current = error as NSError?
+        while let nsError = current {
+            if nsError.domain == NSURLErrorDomain { return offlineCodes.contains(nsError.code) }
+            current = nsError.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return false
     }
 }

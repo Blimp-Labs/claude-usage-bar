@@ -42,6 +42,45 @@ final class AppUpdaterTests: XCTestCase {
         )
     }
 
+    func testOfflineBackgroundChecksAreIgnored() {
+        for code in [NSURLErrorNotConnectedToInternet, NSURLErrorCannotConnectToHost, NSURLErrorTimedOut] {
+            let error = sparkleDownloadError(wrapping: code)
+            XCTAssertTrue(AppUpdater.isOfflineBackgroundCheck(.updatesInBackground, error: error), "code \(code)")
+        }
+    }
+
+    func testOfflineManualChecksAreStillReported() {
+        let error = sparkleDownloadError(wrapping: NSURLErrorNotConnectedToInternet)
+        XCTAssertFalse(AppUpdater.isOfflineBackgroundCheck(.updates, error: error))
+    }
+
+    func testOtherBackgroundFailuresAreStillReported() {
+        XCTAssertFalse(AppUpdater.isOfflineBackgroundCheck(.updatesInBackground, error: nil))
+        XCTAssertFalse(AppUpdater.isOfflineBackgroundCheck(
+            .updatesInBackground,
+            error: makeError(.appcastParseError, description: "Bad feed")
+        ))
+        XCTAssertFalse(AppUpdater.isOfflineBackgroundCheck(
+            .updatesInBackground,
+            error: sparkleDownloadError(wrapping: NSURLErrorBadServerResponse)
+        ))
+    }
+
+    /// The shape Sparkle 2.8 produces: two download errors around the URL error.
+    private func sparkleDownloadError(wrapping urlCode: Int) -> NSError {
+        let urlError = NSError(domain: NSURLErrorDomain, code: urlCode)
+        let download = NSError(
+            domain: SUSparkleErrorDomain,
+            code: Int(SUError.downloadError.rawValue),
+            userInfo: [NSUnderlyingErrorKey: urlError]
+        )
+        return NSError(
+            domain: SUSparkleErrorDomain,
+            code: Int(SUError.downloadError.rawValue),
+            userInfo: [NSUnderlyingErrorKey: download]
+        )
+    }
+
     private func makeError(
         _ code: SUError,
         description: String? = nil,
