@@ -25,23 +25,13 @@ final class UsageHistoryServiceTests: XCTestCase {
 
     // MARK: - Flush persistence & permissions
 
-    func testFlushWritesFileWithCorrectPermissions() throws {
-        let service = makeService()
-        service.recordDataPoint(pct5h: 0.5, pct7d: 0.3)
-        service.flushToDisk()
-
-        let url = service.historyFileURL
-        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
-
-        let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
-        let perms = attrs[.posixPermissions] as? Int
-        XCTAssertEqual(perms, 0o600, "History file should have 0600 permissions")
-    }
-
-    func testFlushDataRoundTrips() throws {
+    func testFlushRoundTripsWithPrivatePermissions() throws {
         let service = makeService()
         service.recordDataPoint(pct5h: 0.42, pct7d: 0.88)
         service.flushToDisk()
+
+        let attrs = try FileManager.default.attributesOfItem(atPath: service.historyFileURL.path)
+        XCTAssertEqual(attrs[.posixPermissions] as? Int, 0o600)
 
         let service2 = makeService()
         service2.loadHistory()
@@ -51,13 +41,16 @@ final class UsageHistoryServiceTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(service2.history.dataPoints.first).pct7d, 0.88, accuracy: 0.001)
     }
 
-    func testFlushPreservesExistingFileOnSecondWrite() throws {
+    func testSecondFlushKeepsDataAndPermissions() throws {
         let service = makeService()
         service.recordDataPoint(pct5h: 0.1, pct7d: 0.2)
         service.flushToDisk()
 
         service.recordDataPoint(pct5h: 0.3, pct7d: 0.4)
         service.flushToDisk()
+
+        let attrs = try FileManager.default.attributesOfItem(atPath: service.historyFileURL.path)
+        XCTAssertEqual(attrs[.posixPermissions] as? Int, 0o600)
 
         let service2 = makeService()
         service2.loadHistory()
@@ -66,19 +59,12 @@ final class UsageHistoryServiceTests: XCTestCase {
 
     func testFlushIsNoOpWhenNotDirty() {
         let service = makeService()
-
-        // Not dirty — flush should be a no-op
         service.flushToDisk()
 
-        // File should not exist since there was nothing to write
         XCTAssertFalse(FileManager.default.fileExists(atPath: service.historyFileURL.path))
     }
 
-
-    /// The upgrade path, which the fresh-temp-dir tests above cannot reach:
-    /// every existing install already has a history.json at 0644. replaceItemAt
-    /// keeps the original item's metadata unless told otherwise, so without
-    /// .usingNewMetadataOnly the tightening only ever applied to new installs.
+    /// Upgrade path: an existing 0644 file must end up 0600.
     func testExistingLooseFileIsTightenedOnFlush() throws {
         let service = makeService()
         FileManager.default.createFile(
@@ -92,18 +78,5 @@ final class UsageHistoryServiceTests: XCTestCase {
 
         let attrs = try FileManager.default.attributesOfItem(atPath: service.historyFileURL.path)
         XCTAssertEqual(attrs[.posixPermissions] as? Int, 0o600)
-    }
-
-    func testPermissionsPreservedAfterMultipleFlushes() throws {
-        let service = makeService()
-        service.recordDataPoint(pct5h: 0.1, pct7d: 0.2)
-        service.flushToDisk()
-
-        service.recordDataPoint(pct5h: 0.3, pct7d: 0.4)
-        service.flushToDisk()
-
-        let attrs = try FileManager.default.attributesOfItem(atPath: service.historyFileURL.path)
-        let perms = attrs[.posixPermissions] as? Int
-        XCTAssertEqual(perms, 0o600, "Permissions should remain 0600 after multiple flushes")
     }
 }
