@@ -1,0 +1,910 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Claude Usage Bar</title>
+<meta name="description" content="A free, open-source macOS menu bar app that shows your Claude 5-hour and weekly limits and warns you before you run out.">
+<link rel="icon" href="icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&display=swap">
+<style>
+/* Layout: the nav sits on the page; the hero is a backlit Mac screen with the app's real popover rebuilt in HTML; the rest is framed cards between two rails. Dark only. */
+:root {
+  --page: #000000; --card: #0f0e0d; --inset: #181716; --ink: #f5f5f7; --muted: #a1a1a6; --line: #262422; --rail: #1d1b1a;
+  --accent: #ef7b58; --accent-2: #ffb070; --btn: #f5f5f7; --btn-ink: #111111;
+  --orange: #ff9f0a; --purple: #bf5af2; --blue: #0a84ff; --pink: #ff375f; --green: #30d158; --teal: #32b7d1;
+  --bezel: #0b0b0c; --bezel-edge: #48484c; --screen: #0f0f10;
+  --pop-bg: #252527; --pop-line: rgb(255 255 255 / 0.1); --pop-ink: #f5f5f7; --pop-muted: rgb(235 235 245 / 0.6);
+  --pop-track: rgb(255 255 255 / 0.12); --bar-green: #30d158; --bar-yellow: #ffd60a; --bar-red: #ff453a; --line-5h: #4c8dff; --line-7d: #ff9f0a;
+  --text: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
+  --display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Archivo", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+  --spring: cubic-bezier(.34, 1.56, .64, 1);
+  --pop: cubic-bezier(.25, 1, .5, 1);
+  color-scheme: dark;
+}
+/* The popover's spring (stiffness 1540, damping 68.4, mass 1; Motion's bounce 0.13, visualDuration 0.13s), as a CSS linear() easing where supported. */
+@supports (animation-timing-function: linear(0, 1)) {
+  :root { --pop: linear(0, 0.0153, 0.0549, 0.1111, 0.1776, 0.2497, 0.3237, 0.397, 0.4677, 0.5343, 0.5962, 0.6527, 0.7038, 0.7494, 0.7898, 0.8251, 0.8559, 0.8823, 0.9049, 0.924, 0.9401, 0.9535, 0.9646, 0.9736, 0.981, 0.9868, 0.9915, 0.9951, 0.9978, 0.9999, 1.0014, 1.0024, 1.0031, 1.0035, 1.0037, 1.0038, 1.0037, 1.0035, 1.0033, 1.003, 1); }
+}
+
+body { background: var(--page); color: var(--ink); font: 400 17px/1.5 var(--text); -webkit-font-smoothing: antialiased; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 30; background: var(--page); }
+a { color: inherit; text-decoration: none; }
+a:focus-visible, button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 8px; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+h1, h2, h3 { font-family: var(--display); margin: 0; text-wrap: balance; letter-spacing: -0.025em; }
+p, ul, ol { margin: 0; }
+code { font: 0.9em var(--mono); }
+.page { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); overflow-x: clip; }
+.wide { max-width: 1240px; margin: 0 auto; }
+
+/* Nav: the full bar sits on the page at the top; once you scroll it gives way to a small centred pill with GitHub and Download. */
+.nav { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; padding: 12px 0; }
+.nav.docked { pointer-events: none; }
+.nav-inner { display: flex; align-items: center; gap: 20px; padding: 8px 10px 8px 14px; transition: opacity .25s, transform .3s var(--pop), visibility 0s; }
+.nav.docked .nav-inner { opacity: 0; visibility: hidden; transform: translateY(-8px); transition: opacity .15s, transform .3s, visibility 0s .3s; }
+.nav-pill {
+  position: absolute; top: 12px; left: 50%; display: flex; align-items: center; gap: 4px; padding: 5px; border-radius: 999px;
+  background: color-mix(in srgb, var(--card) 80%, transparent); border: 1px solid var(--line);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: 0 10px 30px -14px rgb(0 0 0 / .7);
+  opacity: 0; visibility: hidden; transform: translate(-50%, -8px) scale(.85); transition: opacity .15s, transform .2s, visibility 0s .2s;
+}
+.nav.docked .nav-pill { pointer-events: auto; opacity: 1; visibility: visible; transform: translate(-50%, 0); transition: opacity .2s, transform .3s var(--pop), visibility 0s; }
+.nav-pill .gh { display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px 7px 10px; border-radius: 999px; color: var(--muted); font-size: 14px; }
+.nav-pill .gh:hover { color: var(--ink); background: var(--inset); }
+.nav-pill svg { width: 16px; height: 16px; }
+.nav-pill .stars { display: inline-flex; align-items: center; gap: 4px; margin-left: 3px; padding-left: 10px; border-left: 1px solid var(--line); color: var(--ink); font-variant-numeric: tabular-nums; }
+.nav-pill .stars svg { width: 16px; height: 16px; color: var(--muted); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 16px; }
+.brand img { width: 28px; height: 28px; border-radius: 7px; }
+.links { display: flex; gap: 2px; margin: 0 auto; }
+.links a { padding: 7px 12px; border-radius: 10px; color: var(--muted); font-size: 15px; }
+.links a:hover { color: var(--ink); background: var(--inset); }
+
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 20px; border-radius: 999px; font-size: 16px; font-weight: 500; border: 1px solid var(--line); background: var(--card); transition: transform .2s var(--spring); }
+.btn:hover { transform: translateY(-1px); }
+.btn:active { transform: scale(.97); }
+.btn svg { width: 18px; height: 18px; }
+.btn-ink { background: var(--btn); color: var(--btn-ink); border-color: var(--btn); }
+.btn.small { padding: 8px 16px; font-size: 14px; }
+.btn.small svg { width: 16px; height: 16px; }
+
+/* Hero: a Mac screen lit from behind. A thin bright rim hugs its edges, a softer light behind it leans toward the pointer, and film grain moves through the glow. */
+.hero { position: relative; isolation: isolate; padding-top: 72px; }
+.laptop { position: relative; padding: 14px 14px 0; border-radius: 58px 58px 0 0; background: var(--bezel); box-shadow: inset 0 0 0 2px var(--bezel-edge); }
+.backlight {
+  --bx: max(260px, calc(50vw - 600px));
+  position: absolute; inset: -260px calc(-1 * var(--bx)) 0; z-index: -1; pointer-events: none; overflow: hidden; background: var(--page);
+  -webkit-mask-image: linear-gradient(#000 52%, transparent 96%); mask-image: linear-gradient(#000 52%, transparent 96%);
+  animation: light-on 1.6s ease-out .15s both;
+}
+.backlight > *, .ambient > * { position: absolute; }
+.rim {
+  inset: 260px var(--bx) -400px; border-radius: 58px 58px 0 0;
+  box-shadow: 0 0 1px 1px rgb(255 255 255 / .9), 0 0 6px 2px rgb(255 255 255 / .6), 0 0 22px 6px rgb(255 255 255 / .28),
+    0 0 70px 14px rgb(255 255 255 / .12), 0 0 180px 40px rgb(255 255 255 / .05);
+}
+.lamp {
+  left: 50%; top: 260px; width: 1000px; height: 440px; margin: -200px 0 0 -500px; border-radius: 50%;
+  background: radial-gradient(closest-side, rgb(255 255 255 / .34), rgb(255 255 255 / .12) 40%, rgb(255 255 255 / .03) 75%, transparent);
+  transition: transform 1.2s cubic-bezier(.2, .8, .2, 1);
+}
+.grain { inset: -128px; background-image: var(--grain, none); mix-blend-mode: overlay; opacity: .9; animation: grain .4s steps(1) infinite; }
+/* Outside the hero, the same light follows the pointer across the whole page (desktop only), behind everything. */
+.ambient { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; background: var(--page); opacity: 0; transition: opacity .8s; }
+.ambient.lit { opacity: 1; }
+.ambient .light {
+  left: 0; top: 0; width: 900px; height: 900px; margin: -450px 0 0 -450px; border-radius: 50%;
+  background: radial-gradient(closest-side, rgb(255 255 255 / .14), rgb(255 255 255 / .05) 45%, rgb(255 255 255 / .012) 75%, transparent);
+  transition: transform .9s cubic-bezier(.2, .8, .2, 1);
+}
+@keyframes light-on { from { opacity: 0; } }
+@keyframes grain {
+  0% { transform: translate(0, 0); } 17% { transform: translate(-37px, 21px); } 33% { transform: translate(19px, -53px); }
+  50% { transform: translate(-61px, -13px); } 67% { transform: translate(43px, 37px); } 83% { transform: translate(-11px, 59px); }
+}
+.laptop::after { content: ""; position: absolute; left: -2px; right: -2px; bottom: 0; height: 90px; background: linear-gradient(transparent, var(--page)); pointer-events: none; }
+.screen {
+  position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 40px; align-items: start;
+  min-height: 680px; padding: 132px 72px 110px; border-radius: 44px 44px 0 0; background: var(--screen); color: #f5f5f7; overflow: hidden;
+}
+/* The menu bar at real size (1pt = 1px), measured from macOS: the app's status item as its own renderer draws it, then the battery, Wi-Fi, Spotlight and Control Center glyphs, and the clock in 13pt. */
+.menubar { position: absolute; top: 0; left: 0; right: 0; height: 30px; display: flex; align-items: center; justify-content: flex-end; gap: 20px; padding: 0 20px; font-size: 13px; -webkit-font-smoothing: auto; }
+.menubar svg { display: block; flex: none; fill: #fff; }
+.status-item { display: grid; place-items: center; height: 24px; padding: 0 6px; border-radius: 6px; transition: background .2s; }
+.status-item[aria-expanded="true"] { background: rgb(255 255 255 / .2); }
+.status-item i { width: 56px; height: 18px; background: #fff; -webkit-mask: url(status-item.png) center / 100% no-repeat; mask: url(status-item.png) center / 100% no-repeat; }
+.clock { margin-left: 3.5px; }
+
+.hero-copy { display: grid; justify-items: start; gap: 22px; align-self: center; padding-bottom: 40px; }
+.hero h1 { font-size: clamp(40px, 4.6vw, 62px); font-weight: 800; line-height: 1.02; letter-spacing: -0.04em; }
+.accent { color: var(--accent-2); background: linear-gradient(90deg, #ef7b58, #ffb070); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.hero .lede { max-width: 28em; color: rgb(235 235 245 / .7); font-size: 18px; }
+.ctas { display: flex; flex-wrap: wrap; gap: 10px; }
+.hero .btn { background: #fff; color: #111; border-color: #fff; }
+.hero .btn.outline { background: transparent; color: #f5f5f7; border-color: rgb(255 255 255 / .22); }
+.hero .fine { color: rgb(235 235 245 / .5); font-size: 14px; }
+
+/* The popover, rebuilt from the app's dark appearance. */
+.popover {
+  position: relative; z-index: 2; margin-top: -92px; padding: 16px 16px 12px; border-radius: 16px; color: var(--pop-ink);
+  background: var(--pop-bg); box-shadow: 0 0 0 1px var(--pop-line), 0 24px 60px -20px rgb(0 0 0 / .8);
+  font-size: 13px; transform-origin: 79px -8px; will-change: transform;
+  animation: pop-open .19s var(--pop) both, fade-in .1s ease-out both;
+}
+.popover.first { animation-delay: .12s, .12s; }
+.popover.closing { animation: pop-close .15s ease-in both; }
+.popover[hidden] { display: none !important; }
+.popover h4 { margin: 0 0 6px; font: 700 16px var(--text); }
+.p-row { display: grid; gap: 6px; padding-block: 6px; }
+.p-top { display: flex; justify-content: space-between; font-size: 13px; }
+.p-top span:last-child { font-variant-numeric: tabular-nums; }
+.p-bar { height: 6px; border-radius: 999px; background: var(--pop-track); overflow: hidden; }
+.p-bar i { display: block; height: 100%; width: var(--v); border-radius: inherit; background: var(--bar-green); transition: width .6s var(--spring); animation: fill .19s var(--pop) both; animation-delay: calc(.06s + var(--i, 0) * 30ms); }
+.popover.first .p-bar i { animation-delay: calc(.16s + var(--i, 0) * 30ms); }
+.p-bar i[data-level="yellow"] { background: var(--bar-yellow); }
+.p-bar i[data-level="red"] { background: var(--bar-red); }
+.p-reset { font-size: 11px; font-weight: 600; color: var(--pop-muted); }
+.p-sep { height: 1px; margin: 8px 0; background: var(--pop-line); }
+.p-label { font-size: 12px; color: var(--pop-muted); padding-top: 2px; }
+.seg { display: inline-flex; gap: 2px; padding: 2px; margin: 4px 0 8px; border-radius: 7px; background: rgb(255 255 255 / .08); }
+.seg button { padding: 2px 11px; border-radius: 5px; font-size: 12px; color: var(--pop-ink); }
+.seg button[aria-pressed="true"] { background: var(--blue); }
+.chart-wrap { position: relative; }
+.chart { display: block; width: 100%; height: auto; overflow: visible; touch-action: none; }
+.chart .grid { stroke: rgb(255 255 255 / .12); stroke-width: 0.6; }
+.chart .vgrid { stroke: rgb(255 255 255 / .16); stroke-width: 0.6; stroke-dasharray: 2 2; }
+.chart text { fill: var(--pop-muted); font: 8px var(--text); }
+.chart .l5 { fill: none; stroke: var(--line-5h); stroke-width: 1.6; stroke-linejoin: round; }
+.chart .l7 { fill: none; stroke: var(--line-7d); stroke-width: 1.6; stroke-linejoin: round; }
+.chart .cursor { stroke: rgb(255 255 255 / .5); stroke-width: 0.6; visibility: hidden; }
+.chart.hovering .cursor { visibility: visible; }
+.tip { position: absolute; top: 0; padding: 4px 8px; border-radius: 6px; background: rgb(60 60 64 / .95); font-size: 11px; white-space: nowrap; pointer-events: none; transform: translateX(-50%); font-variant-numeric: tabular-nums; }
+.legend { display: flex; gap: 12px; margin-top: 4px; font-size: 11px; color: var(--pop-muted); }
+.legend i { display: inline-block; width: 7px; height: 7px; margin-right: 5px; border-radius: 50%; background: var(--c); }
+.p-foot { display: grid; gap: 6px; font-size: 12px; color: var(--pop-muted); }
+.p-actions { display: flex; gap: 14px; }
+.p-actions button { color: var(--pop-muted); font-size: 12px; }
+.p-actions button:hover { color: var(--pop-ink); }
+.p-actions .push { margin-right: auto; }
+
+/* Framed sections below the hero. */
+/* The frame is as wide as the hero's screen and opaque, so the two read as one dark column and the pointer's light only shows around it. */
+.frame { position: relative; max-width: 1184px; margin: 0 auto; padding: 0 28px 40px; background: var(--page); }
+.frame::before, .frame::after { content: ""; position: absolute; top: 0; bottom: 0; width: 1px; background: var(--rail); }
+.frame::before { left: 0; }
+.frame::after { right: 0; }
+.seam { position: relative; height: 1px; margin: 0 -28px; background: var(--rail); }
+.seam::before, .seam::after {
+  content: ""; position: absolute; z-index: 1; top: -6px; width: 13px; height: 13px;
+  background: linear-gradient(var(--muted) 0 0) center / 1px 100% no-repeat, linear-gradient(var(--muted) 0 0) center / 100% 1px no-repeat;
+}
+.seam::before { left: -6px; }
+.seam::after { right: -6px; }
+
+.strip { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 28px; padding: 30px 28px; }
+.strip > p { color: var(--muted); font-size: 15px; }
+/* Monochrome chips. One light (--bx along the row, --by from the top edge at 0 to the bottom at 1) snakes over one chip's top edge and under the next one's bottom edge. */
+.strip ul { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; padding: 0; --bx: -999px; --by: 0; }
+.strip li { position: relative; display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: rgb(255 255 255 / .03); border: 1px solid var(--line); font-size: 14px; }
+.strip li::before {
+  content: ""; position: absolute; inset: -1px; padding: 1px; border-radius: inherit; pointer-events: none;
+  background: radial-gradient(52px 20px at calc(var(--bx) - var(--ox, 0px)) calc(var(--by) * 100%), rgb(255 255 255 / .95), rgb(255 255 255 / .3) 45%, transparent 70%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude;
+}
+.strip li i { width: 6px; height: 6px; border-radius: 50%; background: radial-gradient(64px at calc(var(--bx) - var(--dc, 0px)) 50%, #fff, rgb(255 255 255 / .3)); }
+
+.block { display: grid; gap: 40px; padding-block: 80px; }
+.head { display: grid; justify-items: center; gap: 12px; text-align: center; }
+.eyebrow { font-size: 14px; font-weight: 600; color: var(--accent); }
+.head h2, .try h2, .more h2, .cta h2 { font-size: clamp(30px, 4vw, 44px); font-weight: 800; line-height: 1.06; }
+.step h3, .feat h3 { font-size: 19px; font-weight: 700; letter-spacing: -0.015em; }
+.step p, .feat p, .try-copy p { color: var(--muted); font-size: 16px; }
+.tile { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; background: rgb(255 255 255 / .06); box-shadow: inset 0 0 0 1px rgb(255 255 255 / .1); color: var(--ink); flex: none; }
+.tile svg { width: 22px; height: 22px; }
+
+.steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px 32px; }
+.step { display: grid; grid-template-rows: auto 1fr auto; gap: 8px; }
+.step h3 { display: flex; align-items: center; gap: 10px; }
+@supports (grid-template-rows: subgrid) {
+  .step { grid-row: span 3; grid-template-rows: subgrid; }
+}
+.num { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--inset); font-size: 14px; font-weight: 600; color: var(--muted); }
+.snip { margin-top: 14px; min-height: 160px; border-radius: 14px; border: 1px solid var(--line); overflow: hidden; background: var(--inset); }
+.install { display: flex; align-items: center; justify-content: center; gap: 18px; }
+.install img { width: 64px; height: 64px; border-radius: 15px; }
+.install .arrow { width: 54px; height: 16px; color: var(--muted); }
+/* The label hangs below the icon without counting toward its height, so the folder lines up with the app icon like in a Finder window. */
+.folder { display: grid; grid-template-rows: 80px 0; justify-items: center; font-size: 12px; color: var(--ink); }
+.folder img { width: 80px; height: 80px; border-radius: 0; }
+.mini-browser { display: grid; grid-template-rows: auto 1fr; background: var(--card); }
+.mb-bar { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--inset); }
+.mb-bar i { width: 9px; height: 9px; border-radius: 50%; background: var(--rail); }
+.mb-url { margin-left: 8px; padding: 2px 10px; border-radius: 6px; background: var(--card); font: 11px var(--mono); color: var(--muted); }
+.mb-page { position: relative; display: grid; place-content: center; text-align: center; gap: 2px; padding: 0 12px; }
+.mb-brand { position: absolute; top: 8px; left: 10px; display: flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 600; }
+.mb-brand img { width: 12px; height: 12px; border-radius: 3px; }
+.mb-page strong { font: 600 15px var(--display); }
+.mb-page span { font-size: 11px; color: var(--muted); }
+.settings { display: grid; padding: 6px 14px; background: var(--card); }
+.s-row { display: grid; grid-template-columns: 1fr 1.1fr; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.s-row:last-child { border-bottom: 0; }
+.s-row small { display: block; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.s-row input { width: 100%; accent-color: var(--ink); }
+
+.features { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 48px 40px; }
+.feat { display: grid; align-content: start; gap: 10px; }
+.feat .tile { margin-bottom: 6px; }
+
+.try { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 80px 40px; align-items: center; }
+.try-copy { display: grid; justify-items: start; gap: 14px; }
+.try-demo { position: relative; display: grid; gap: 18px; box-sizing: border-box; width: min(100%, 420px); justify-self: center; padding: 28px; border-radius: 18px; background: var(--inset); }
+/* The notification floats over the card's top edge, so the card itself stays evenly padded. */
+.banner {
+  position: absolute; bottom: calc(100% - 18px); left: 14px; right: 14px; z-index: 1; display: grid; grid-template-columns: 36px 1fr auto; gap: 10px; align-items: center;
+  padding: 10px 12px; border-radius: 16px; background: #2a2826; border: 1px solid rgb(255 255 255 / .08); box-shadow: 0 18px 40px -14px rgb(0 0 0 / .8);
+  transition: opacity .25s, transform .25s;
+}
+.banner img { width: 36px; height: 36px; border-radius: 8px; }
+.banner strong { display: block; font-size: 14px; font-weight: 600; }
+.banner span, .banner time { font-size: 13px; color: var(--muted); }
+.banner time { align-self: start; font-size: 12px; }
+.banner.gone { opacity: 0; transform: translateY(-10px) scale(.96); }
+.banner.popin { animation: pop-banner .55s var(--spring); }
+.meter { display: grid; gap: 8px; }
+.meter-top { display: flex; justify-content: space-between; font-size: 15px; }
+.meter-top span:last-child { font-variant-numeric: tabular-nums; }
+.bar { position: relative; height: 8px; border-radius: 999px; background: rgb(255 255 255 / .1); }
+.bar i { position: absolute; inset: 0 auto 0 0; width: var(--v); border-radius: inherit; background: var(--bar-green); transition: width .24s linear, background .3s; }
+.bar i[data-level="yellow"] { background: #f2c230; }
+.bar i[data-level="red"] { background: var(--bar-red); }
+.mark { position: absolute; top: -5px; bottom: -5px; left: var(--at); width: 2px; margin-left: -1px; border-radius: 2px; background: var(--ink); }
+.resets { font-size: 13px; color: var(--muted); }
+.control { display: flex; justify-content: space-between; font-size: 15px; }
+.control output { font-weight: 600; font-variant-numeric: tabular-nums; }
+.try-demo input[type="range"] { width: 100%; accent-color: var(--ink); }
+
+/* Privacy: copy, a checklist and a link to the code on one side; the Claude spark drawn in ASCII on the other. */
+.more { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 40px; }
+.more-copy { display: grid; justify-items: start; gap: 20px; }
+.ascii { margin: 0; justify-self: center; font: 12px/1 var(--mono); color: var(--accent); white-space: pre; user-select: none; }
+.more h2 .dim { color: var(--muted); }
+.more .sub { color: var(--muted); font-size: 18px; }
+.checks { display: grid; gap: 12px; margin: 4px 0 8px; padding: 0; list-style: none; }
+.checks li { display: flex; align-items: flex-start; gap: 12px; font-size: 16px; }
+.checks svg { width: 16px; height: 16px; flex: none; margin-top: 4px; color: var(--muted); }
+
+.cta { justify-items: center; text-align: center; gap: 18px; }
+.cta img { width: 80px; height: 80px; border-radius: 20px; }
+.cta .fine { color: var(--muted); font-size: 14px; }
+
+footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 24px; padding: 28px 0 0; color: var(--muted); font-size: 14px; }
+footer nav { display: flex; gap: 18px; }
+footer a:hover { color: var(--ink); }
+
+/* Things below the fold spring in as they arrive; anything already on screen stays put. */
+.pop.armed { opacity: 0; transform: scale(.5) rotate(-8deg); }
+.rise.armed { opacity: 0; transform: translateY(18px) scale(.98); }
+.armed.in { opacity: 1; transform: none; transition: transform .75s var(--spring) var(--d, 0ms), opacity .35s ease var(--d, 0ms); }
+.tile:hover svg { animation: wiggle .5s var(--spring); }
+@keyframes wiggle { 30% { transform: rotate(-12deg) scale(1.1); } 60% { transform: rotate(8deg); } }
+@keyframes pop-banner { from { transform: translateY(-14px) scale(.9); } }
+@keyframes pop-open { from { transform: translateY(-8px) scale(.75); } }
+@keyframes fade-in { from { opacity: 0; } }
+@keyframes pop-close { to { transform: translateY(-6px) scale(.9); opacity: 0; } }
+@keyframes fill { from { width: 0; } }
+
+@media (max-width: 1000px) {
+  .screen { grid-template-columns: minmax(0, 1fr); padding: 96px 32px 72px; gap: 36px; }
+  .popover { margin-top: 0; max-width: 380px; width: 100%; justify-self: center; }
+  .hero-copy { padding-bottom: 0; }
+  .menubar .hide-narrow { display: none; }
+  .steps, .features, .try, .more { grid-template-columns: minmax(0, 1fr); }
+  .links { display: none; }
+  .nav-inner { justify-content: space-between; }
+}
+@media (max-width: 640px) {
+  .ascii { font-size: 8px; }
+  .laptop { padding: 8px 8px 0; border-radius: 34px 34px 0 0; }
+  .screen { padding: 72px 20px 64px; border-radius: 26px 26px 0 0; }
+  .menubar { padding: 0 16px; gap: 12px; }
+  .frame { padding: 0 0 32px; }
+  .frame::before, .frame::after, .seam::before, .seam::after { display: none; }
+  .seam { margin: 0; }
+  .block { padding-block: 56px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+<div class="ambient" id="ambient" aria-hidden="true" hidden><i class="light"></i><i class="grain"></i></div>
+
+<div class="page">
+  <header class="nav wide" id="nav">
+    <div class="nav-inner">
+      <a class="brand" href="#top"><img src="icon.png" alt="">Claude Usage Bar</a>
+      <nav class="links">
+        <a href="#features">Features</a>
+        <a href="#privacy">Privacy</a>
+        <a href="https://github.com/Blimp-Labs/claude-usage-bar">GitHub</a>
+      </nav>
+      <a class="btn btn-ink small" href="https://github.com/Blimp-Labs/claude-usage-bar/releases/latest/download/ClaudeUsageBar.dmg">Download</a>
+    </div>
+    <div class="nav-pill">
+      <a class="gh" href="https://github.com/Blimp-Labs/claude-usage-bar"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub<span class="stars"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.751.751 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Zm0 2.445L6.615 5.5a.75.75 0 0 1-.564.41l-3.097.45 2.24 2.184a.75.75 0 0 1 .216.664l-.528 3.084 2.769-1.456a.75.75 0 0 1 .698 0l2.77 1.456-.53-3.084a.75.75 0 0 1 .216-.664l2.24-2.183-3.096-.45a.75.75 0 0 1-.564-.41L8 2.694Z"/></svg><span id="stars">480</span><span class="sr"> stars</span></span></a>
+      <a class="btn btn-ink small" href="https://github.com/Blimp-Labs/claude-usage-bar/releases/latest/download/ClaudeUsageBar.dmg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0 4.5-4.5M12 15l-4.5-4.5M5 19h14"/></svg>Download</a>
+    </div>
+  </header>
+
+  <section class="hero wide" id="top">
+    <div class="laptop">
+      <div class="backlight" id="backlight" aria-hidden="true"><i class="lamp" id="lamp"></i><i class="rim"></i><i class="grain"></i></div>
+      <div class="screen">
+        <div class="menubar">
+          <button class="status-item" id="status-item" type="button" aria-expanded="true" aria-controls="popover" aria-label="Claude Usage Bar menu"><i></i></button>
+          <svg class="hide-narrow" width="25.5" height="12" viewBox="0 0 25.5 12" aria-hidden="true"><rect x=".5" y=".5" width="22" height="11" rx="2.25" fill="none" stroke="#fff" stroke-opacity=".5"/><rect x="2" y="2" width="14.25" height="8" rx="1.25"/><path d="M24 4h.25c.69 0 1.25.56 1.25 1.25v1.5c0 .69-.56 1.25-1.25 1.25H24z" fill-opacity=".6"/></svg>
+          <svg class="hide-narrow" width="17.30" height="12.48" viewBox="1.00 1.00 17.30 12.48" aria-hidden="true"><path d="M2.195 6.337C2.361 6.512 2.626 6.509 2.795 6.325C4.612 4.407 6.986 3.396 9.650 3.396C12.332 3.396 14.720 4.408 16.528 6.335C16.686 6.501 16.942 6.492 17.112 6.320L18.150 5.286C18.302 5.128 18.302 4.918 18.173 4.765C16.391 2.561 13.070 1.000 9.650 1.000C6.238 1.000 2.915 2.560 1.129 4.765C1.000 4.918 1.007 5.128 1.157 5.286ZM5.273 9.377C5.455 9.561 5.707 9.540 5.888 9.347C6.791 8.370 8.214 7.702 9.650 7.709C11.103 7.702 12.529 8.392 13.448 9.374C13.614 9.557 13.847 9.546 14.035 9.372L15.199 8.250C15.344 8.106 15.359 7.903 15.231 7.745C14.065 6.353 11.952 5.361 9.650 5.361C7.350 5.361 5.238 6.354 4.076 7.745C3.943 7.903 3.952 8.095 4.109 8.250ZM9.653 13.482C9.844 13.482 10.004 13.395 10.308 13.104L12.117 11.362C12.257 11.226 12.286 11.006 12.156 10.846C11.626 10.171 10.683 9.649 9.653 9.649C8.597 9.649 7.637 10.196 7.107 10.912C7.013 11.052 7.061 11.232 7.198 11.362L8.999 13.104C9.304 13.389 9.468 13.482 9.653 13.482Z"/></svg>
+          <svg class="hide-narrow" width="12.53" height="12.65" viewBox="1.00 1.00 12.53 12.65" aria-hidden="true"><path d="M1.000 6.167C1.000 9.019 3.316 11.329 6.167 11.329C7.224 11.329 8.197 11.007 9.008 10.453L11.924 13.377C12.109 13.558 12.351 13.645 12.601 13.645C13.140 13.645 13.529 13.235 13.529 12.705C13.529 12.453 13.435 12.221 13.267 12.041L10.367 9.135C10.973 8.301 11.329 7.278 11.329 6.167C11.329 3.316 9.018 1.000 6.167 1.000C3.316 1.000 1.000 3.316 1.000 6.167ZM2.321 6.167C2.321 4.043 4.041 2.321 6.167 2.321C8.287 2.321 10.014 4.043 10.014 6.167C10.014 8.287 8.287 10.014 6.167 10.014C4.041 10.014 2.321 8.287 2.321 6.167Z"/></svg>
+          <svg class="hide-narrow" width="13.31" height="13.58" viewBox="2.00 1.00 13.31 13.58" aria-hidden="true"><path d="M5.094 14.575L12.210 14.575C13.941 14.575 15.308 13.350 15.308 11.595C15.308 9.840 13.941 8.615 12.210 8.615L5.094 8.615C3.362 8.615 2.000 9.840 2.000 11.595C2.000 13.350 3.362 14.575 5.094 14.575ZM10.288 13.211C9.361 13.211 8.617 12.546 8.617 11.587C8.617 10.634 9.361 9.969 10.288 9.969L12.335 9.969C13.268 9.969 14.007 10.634 14.007 11.593C14.007 12.546 13.268 13.211 12.335 13.211ZM5.389 7.568L11.915 7.568C13.846 7.568 15.308 6.246 15.308 4.284C15.308 2.322 13.846 1.000 11.915 1.000L5.389 1.000C3.464 1.000 2.000 2.322 2.000 4.284C2.000 6.246 3.464 7.568 5.389 7.568ZM5.389 6.189C4.282 6.189 3.422 5.426 3.422 4.284C3.422 3.142 4.282 2.379 5.389 2.379L11.915 2.379C13.026 2.379 13.882 3.143 13.882 4.284C13.882 5.425 13.026 6.189 11.915 6.189ZM5.389 5.758L7.323 5.758C8.165 5.758 8.845 5.153 8.845 4.284C8.845 3.410 8.165 2.805 7.323 2.805L5.389 2.805C4.547 2.805 3.867 3.410 3.867 4.279C3.867 5.153 4.547 5.758 5.389 5.758Z"/></svg>
+          <span class="clock">Wed Oct 21&nbsp; 9:41 AM</span>
+        </div>
+
+        <div class="hero-copy">
+          <h1>See your Claude limits <span class="accent">before you hit them.</span></h1>
+          <p class="lede">A free, open-source menu bar app that tracks your 5-hour and weekly limits, shows when they reset, and notifies you before you run out.</p>
+          <div class="ctas">
+            <a class="btn" href="https://github.com/Blimp-Labs/claude-usage-bar/releases/latest/download/ClaudeUsageBar.dmg">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0 4.5-4.5M12 15l-4.5-4.5M5 19h14"/></svg>
+              Download for Mac
+            </a>
+            <a class="btn outline" href="https://github.com/Blimp-Labs/claude-usage-bar">View on GitHub</a>
+          </div>
+          <p class="fine">Free &amp; open source &middot; macOS 14 or later</p>
+        </div>
+
+        <div class="popover first" id="popover" role="group" aria-label="Claude Usage Bar popover with example data">
+          <h4>Claude Usage</h4>
+          <div class="p-row"><div class="p-top"><span>5-Hour Window</span><span data-pct="five">35%</span></div><div class="p-bar"><i data-bar="five" style="--v: 35%"></i></div><span class="p-reset">Resets 2 hr, 59 min</span></div>
+          <div class="p-row"><div class="p-top"><span>7-Day Window</span><span data-pct="seven">55%</span></div><div class="p-bar"><i data-bar="seven" style="--v: 55%"></i></div><span class="p-reset">Resets 3 days, 23 hr</span></div>
+          <div class="p-sep"></div>
+          <p class="p-label">Per-Model (7 day)</p>
+          <div class="p-row"><div class="p-top"><span>Fable</span><span>49%</span></div><div class="p-bar"><i style="--v: 49%"></i></div><span class="p-reset">Resets 4 days, 23 hr</span></div>
+          <div class="p-row"><div class="p-top"><span>Opus</span><span>70%</span></div><div class="p-bar"><i data-level="yellow" style="--v: 70%"></i></div><span class="p-reset">Resets 4 days, 23 hr</span></div>
+          <div class="p-row"><div class="p-top"><span>Sonnet</span><span>15%</span></div><div class="p-bar"><i style="--v: 15%"></i></div><span class="p-reset">Resets 4 days, 23 hr</span></div>
+          <div class="p-sep"></div>
+          <div class="seg" role="group" aria-label="History range">
+            <button type="button" id="r-1h" aria-pressed="false">1h</button>
+            <button type="button" id="r-6h" aria-pressed="false">6h</button>
+            <button type="button" id="r-1d" aria-pressed="true">1d</button>
+            <button type="button" id="r-7d" aria-pressed="false">7d</button>
+            <button type="button" id="r-30d" aria-pressed="false">30d</button>
+          </div>
+          <div class="chart-wrap">
+            <svg class="chart" id="chart" viewBox="0 0 300 118" aria-hidden="true"></svg>
+            <div class="tip" id="tip" hidden></div>
+          </div>
+          <div class="legend"><span><i style="--c: var(--line-5h)"></i>5h</span><span><i style="--c: var(--line-7d)"></i>7d</span></div>
+          <div class="p-sep"></div>
+          <div class="p-foot">
+            <span id="updated">Updated just now</span>
+            <div class="p-actions">
+              <button type="button" class="push" id="go-settings">Settings&hellip;</button>
+              <button type="button" id="refresh">Refresh</button>
+              <button type="button" id="quit">Quit</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="frame">
+    <section class="strip" aria-label="What it tracks">
+      <p>What it tracks</p>
+      <ul>
+        <li><i></i>5-hour window</li>
+        <li><i></i>7-day window</li>
+        <li><i></i>Per-model limits</li>
+        <li><i></i>Extra usage</li>
+        <li><i></i>History up to 30 days</li>
+      </ul>
+    </section>
+    <div class="seam" aria-hidden="true"></div>
+
+    <section class="block" id="start">
+      <div class="head"><p class="eyebrow">Get started</p><h2>Up and running in a minute.</h2></div>
+      <div class="steps">
+        <article class="step">
+          <h3><span class="num">1</span>Download it</h3>
+          <p>Drag the app into Applications. It's free and runs on macOS 14 or later.</p>
+          <div class="snip install rise" aria-hidden="true">
+            <img class="pop" src="icon.png" alt="">
+            <svg class="arrow" viewBox="0 0 54 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8h46" stroke-dasharray="4 5"/><path d="m44 3 6 5-6 5"/></svg>
+            <span class="folder pop"><img src="applications.png" alt="">Applications</span>
+          </div>
+        </article>
+        <article class="step">
+          <h3><span class="num">2</span>Sign in with your browser</h3>
+          <p>Approve access and the app picks it up. There's no API key to paste.</p>
+          <div class="snip mini-browser rise" aria-hidden="true">
+            <div class="mb-bar"><i></i><i></i><i></i><span class="mb-url">localhost/callback</span></div>
+            <div class="mb-page"><span class="mb-brand"><img src="icon.png" alt="">Claude Usage Bar</span><strong>You're signed in</strong><span>You can close this tab and go back to Claude Usage Bar.</span></div>
+          </div>
+        </article>
+        <article class="step">
+          <h3><span class="num">3</span>Pick your alerts</h3>
+          <p>Choose a percentage for each limit and get a notification when you cross it.</p>
+          <div class="snip settings rise">
+            <label class="s-row" for="s-5h"><span>5-hour window<small data-out="s-5h">80%</small></span><input type="range" id="s-5h" min="0" max="100" step="5" value="80"></label>
+            <label class="s-row" for="s-7d"><span>7-day window<small data-out="s-7d">90%</small></span><input type="range" id="s-7d" min="0" max="100" step="5" value="90"></label>
+            <label class="s-row" for="s-extra"><span>Extra usage<small data-out="s-extra">Off</small></span><input type="range" id="s-extra" min="0" max="100" step="5" value="0"></label>
+          </div>
+        </article>
+      </div>
+    </section>
+    <div class="seam" aria-hidden="true"></div>
+
+    <section class="block" id="alerts">
+      <article class="try">
+        <div class="try-copy">
+          <span class="tile pop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg></span>
+          <h2>A heads-up before you hit the limit.</h2>
+          <p>Set a threshold for each limit and get a notification the moment you cross it. Try the slider.</p>
+        </div>
+        <div class="try-demo">
+          <div class="banner" id="banner" aria-hidden="true"><img src="icon.png" alt=""><div><strong>Claude Usage</strong><span id="banner-text">5-hour usage has reached 80%</span></div><time>now</time></div>
+          <div class="meter" aria-hidden="true">
+            <div class="meter-top"><span>5-Hour Window</span><span id="usage-pct">84%</span></div>
+            <div class="bar"><i id="usage-bar" data-level="red" style="--v: 84%"></i><span class="mark" id="usage-mark" style="--at: 80%"></span></div>
+            <p class="resets">Resets 2 hr, 59 min</p>
+          </div>
+          <div class="control"><label for="alert-at">Notify me at</label><output id="alert-out" for="alert-at">80%</output></div>
+          <input type="range" id="alert-at" min="10" max="100" step="5" value="80">
+        </div>
+      </article>
+    </section>
+    <div class="seam" aria-hidden="true"></div>
+
+    <section class="block" id="features">
+      <div class="head"><p class="eyebrow">Features</p><h2>One click shows where you stand.</h2></div>
+      <div class="features">
+        <article class="feat">
+          <span class="tile pop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4.5 16a8 8 0 1 1 15 0"/><path d="m12 13 3.5-4"/></svg></span>
+          <h3>Both limits at a glance</h3>
+          <p>The menu bar icon shows your 5-hour and 7-day usage. Click it for exact numbers and reset times.</p>
+        </article>
+        <article class="feat">
+          <span class="tile pop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 7h14M5 12h9M5 17h11"/></svg></span>
+          <h3>Per-model usage</h3>
+          <p>Weekly usage for each model your plan limits separately, each with its own reset time.</p>
+        </article>
+        <article class="feat">
+          <span class="tile pop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l5-5 4 3 7-8"/><path d="M4 20h16"/></svg></span>
+          <h3>History up to 30 days</h3>
+          <p>See how fast you're using your limits and when each window reset. Hover for exact values.</p>
+        </article>
+        <article class="feat">
+          <span class="tile pop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M5 12H3M21 12h-2"/><circle cx="12" cy="12" r="5"/></svg></span>
+          <h3>Extra usage in dollars</h3>
+          <p>If your plan allows extra usage, see what you've spent against your monthly limit.</p>
+        </article>
+        <article class="feat">
+          <span class="tile pop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v5l3 2"/><circle cx="12" cy="12" r="8"/></svg></span>
+          <h3>Refresh on your schedule</h3>
+          <p>Every 5 minutes, 15 minutes, 30 minutes or hour, and it can start when you log in.</p>
+        </article>
+        <article class="feat">
+          <span class="tile pop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v4h-4"/></svg></span>
+          <h3>Updates itself</h3>
+          <p>It checks for a new version once a day and asks before installing. You can turn that off.</p>
+        </article>
+      </div>
+    </section>
+    <div class="seam" aria-hidden="true"></div>
+
+    <section class="block more" id="privacy">
+      <div class="more-copy">
+        <p class="eyebrow">Privacy</p>
+        <h2><span class="dim">Free and open source.</span><br>Your data stays on your Mac.</h2>
+        <p class="sub">Tokens and usage history are stored on your Mac. The app only talks to Anthropic and GitHub.</p>
+        <ul class="checks">
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Stored files are readable only by you</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>No analytics or tracking</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Updates are signed and verified before they install</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Licensed under BSD 2-Clause</li>
+        </ul>
+        <a class="btn btn-ink" href="https://github.com/Blimp-Labs/claude-usage-bar">View the source<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg></a>
+      </div>
+      <pre class="ascii" id="ascii" aria-hidden="true"></pre>
+    </section>
+    <div class="seam" aria-hidden="true"></div>
+
+    <section class="block cta">
+      <img class="pop" src="icon.png" alt="">
+      <h2>Know where you stand before you run out.</h2>
+      <p class="fine">Free for macOS 14 and later.</p>
+      <div class="ctas">
+        <a class="btn btn-ink" href="https://github.com/Blimp-Labs/claude-usage-bar/releases/latest/download/ClaudeUsageBar.dmg">Download for Mac</a>
+        <a class="btn" href="https://github.com/Blimp-Labs/claude-usage-bar">View on GitHub</a>
+      </div>
+    </section>
+
+    <div class="seam" aria-hidden="true"></div>
+    <footer>
+      <span>Claude Usage Bar is an independent project, not affiliated with Anthropic.</span>
+      <nav>
+        <a href="https://github.com/Blimp-Labs/claude-usage-bar">GitHub</a>
+        <a href="https://github.com/Blimp-Labs/claude-usage-bar/releases">Releases</a>
+      </nav>
+    </footer>
+  </div>
+</div>
+
+<script>
+(() => {
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const $ = (id) => document.getElementById(id);
+
+  // Star count in the compact nav: live from GitHub once per session when reachable, otherwise the count written into the page.
+  const stars = $("stars");
+  const showStars = (n) => (stars.textContent = n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k` : String(n));
+  let cachedStars = null;
+  try { cachedStars = JSON.parse(sessionStorage.getItem("stars") || "null"); } catch {}
+  if (typeof cachedStars === "number") {
+    showStars(cachedStars);
+  } else {
+    fetch("https://api.github.com/repos/Blimp-Labs/claude-usage-bar")
+      .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
+      .then((repo) => {
+        showStars(repo.stargazers_count);
+        try { sessionStorage.setItem("stars", JSON.stringify(repo.stargazers_count)); } catch {}
+      })
+      .catch(() => {});
+  }
+
+  // What it tracks: one light circles the chips like a racetrack. It goes right over one chip and under the next, around
+  // the end of the last chip, back on the opposite edges, and around the end of the first, easing to a stop on each chip.
+  // Positions are measured along the sequence of chips, not the screen, so it visits them in order even when the row wraps.
+  const chips = document.querySelector(".strip ul");
+  let pills = [];
+  const measureChips = () => {
+    const gap = parseFloat(getComputedStyle(chips).columnGap) || 0;
+    let at = 0;
+    pills = [...chips.children].map((chip) => {
+      const width = chip.offsetWidth;
+      chip.style.setProperty("--ox", `${at}px`);
+      chip.style.setProperty("--dc", `${at + width / 2 - 3}px`);
+      const pill = { centre: at + width / 2, width, radius: chip.offsetHeight / 2 };
+      at += width + gap;
+      return pill;
+    });
+  };
+  measureChips();
+  document.fonts?.ready.then(measureChips);
+  addEventListener("resize", measureChips);
+  if (!still) {
+    const leg = 1300;
+    const easeInOutQuart = (u) => (u < 0.5 ? 8 * u ** 4 : 1 - (-2 * u + 2) ** 4 / 2);
+    let frame = 0, start = 0;
+    // Stops on the way out (top, bottom, top, ...) and on the way back, on each chip's other edge.
+    const route = () => [
+      ...pills.map((_, i) => ({ i, y: i % 2 })),
+      ...pills.map((_, i) => ({ i, y: 1 - (i % 2) })).reverse(),
+    ];
+    // Partway (u from 0 to 1) around one end of a chip: along one edge, around the rounded end, back along the other.
+    const turn = (pill, fromY, u, side) => {
+      const straight = pill.width / 2 - pill.radius, arc = Math.PI * pill.radius, d = u * (2 * straight + arc);
+      const capCentre = pill.centre + side * straight;
+      if (d < straight) return [pill.centre + side * d, fromY];
+      if (d < straight + arc) {
+        const angle = (d - straight) / pill.radius;
+        return [capCentre + side * pill.radius * Math.sin(angle), fromY + (1 - 2 * fromY) * (0.5 - 0.5 * Math.cos(angle))];
+      }
+      return [capCentre - side * (d - straight - arc), 1 - fromY];
+    };
+    const tick = (now) => {
+      start ||= now;
+      const stops = route(), t = (now - start) / leg;
+      const k = Math.floor(t) % stops.length, e = easeInOutQuart(t - Math.floor(t));
+      const from = stops[k], to = stops[(k + 1) % stops.length];
+      let x, y;
+      if (from.i === to.i) {
+        [x, y] = turn(pills[from.i], from.y, e, from.i === 0 ? -1 : 1);
+      } else {
+        x = pills[from.i].centre + (pills[to.i].centre - pills[from.i].centre) * e;
+        y = from.y + (to.y - from.y) * e;
+      }
+      chips.style.setProperty("--bx", `${x}px`);
+      chips.style.setProperty("--by", String(y));
+      frame = requestAnimationFrame(tick);
+    };
+    const run = (on) => {
+      if (on && !frame) frame = requestAnimationFrame(tick);
+      if (!on && frame) { cancelAnimationFrame(frame); frame = 0; }
+    };
+    if ("IntersectionObserver" in window) new IntersectionObserver(([entry]) => run(entry.isIntersecting)).observe(chips);
+    else run(true);
+  }
+
+  // Privacy: the Claude spark drawn in ASCII, turning slowly, with grain on its edges and a haze of dots around it.
+  // Character cells are 0.6em wide and 1em tall, so x is scaled by 0.6 to keep the spark round.
+  const ascii = $("ascii");
+  const COLS = 64, ROWS = 38, RAMP = " .:-=+*#%@";
+  const rays = Array.from({ length: 12 }, (_, i) => ({
+    angle: (i / 12) * Math.PI * 2 + Math.sin(i * 2.3) * 0.05,
+    length: 0.8 + (0.12 * ((i * 7) % 5)) / 4,
+    width: 0.07 + (0.02 * ((i * 3) % 4)) / 3,
+  }));
+  const smoothstep = (edge0, edge1, x) => {
+    const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
+    return t * t * (3 - 2 * t);
+  };
+  const drawSpark = (time) => {
+    const spin = time * 0.00012;
+    let out = "";
+    for (let row = 0; row < ROWS; row++) {
+      for (let col = 0; col < COLS; col++) {
+        const u = ((col + 0.5 - COLS / 2) * 0.6) / (ROWS / 2), v = (row + 0.5 - ROWS / 2) / (ROWS / 2);
+        const radius = Math.hypot(u, v);
+        let light = smoothstep(0.2, 0.08, radius);
+        for (const ray of rays) {
+          const dx = Math.cos(ray.angle + spin), dy = Math.sin(ray.angle + spin);
+          const length = ray.length * (1 + 0.04 * Math.sin(time * 0.0013 + ray.angle * 3));
+          const along = Math.max(0, Math.min(length, u * dx + v * dy));
+          const width = ray.width * (1 - (0.3 * along) / length);
+          const edge = smoothstep(width + 0.05, width - 0.02, Math.hypot(u - along * dx, v - along * dy));
+          // Brightest at the core, fading toward each tip.
+          light = Math.max(light, edge * (1 - 0.5 * (along / length) ** 1.5));
+        }
+        const haze = 0.22 * Math.exp(-4 * Math.max(0, radius - 0.6)) * Math.random();
+        const value = Math.min(0.999, Math.max(0, light + haze + (Math.random() - 0.5) * 0.12 * light));
+        out += RAMP[Math.floor(value * RAMP.length)];
+      }
+      out += "\n";
+    }
+    ascii.textContent = out;
+  };
+  drawSpark(0);
+  if (!still) {
+    let sparkFrame = 0, lastDraw = 0;
+    const loop = (now) => {
+      if (now - lastDraw > 50) { drawSpark(now); lastDraw = now; }
+      sparkFrame = requestAnimationFrame(loop);
+    };
+    const runSpark = (on) => {
+      if (on && !sparkFrame) sparkFrame = requestAnimationFrame(loop);
+      if (!on && sparkFrame) { cancelAnimationFrame(sparkFrame); sparkFrame = 0; }
+    };
+    if ("IntersectionObserver" in window) new IntersectionObserver(([entry]) => runSpark(entry.isIntersecting)).observe(ascii);
+    else runSpark(true);
+  }
+
+  // Nav shrinks to the centred pill after the first scroll.
+  const nav = $("nav");
+  const dock = () => nav.classList.toggle("docked", scrollY > 24);
+  addEventListener("scroll", dock, { passive: true });
+  dock();
+
+  // Lighting: a tile of film grain drawn once, the hero's backlight leaning toward the pointer, and a page-wide light following it.
+  const grain = document.createElement("canvas");
+  grain.width = grain.height = 128;
+  const g = grain.getContext("2d");
+  if (g) {
+    const noise = g.createImageData(128, 128);
+    for (let i = 0; i < noise.data.length; i += 4) {
+      noise.data[i] = noise.data[i + 1] = noise.data[i + 2] = 128 + (Math.random() - 0.5) * 110;
+      noise.data[i + 3] = 255;
+    }
+    g.putImageData(noise, 0, 0);
+    document.documentElement.style.setProperty("--grain", `url(${grain.toDataURL()})`);
+    document.querySelectorAll(".grain").forEach((el) => (el.style.backgroundSize = `${128 / Math.max(1, devicePixelRatio)}px`));
+  }
+  if (!still && matchMedia("(pointer: fine)").matches) {
+    const laptop = document.querySelector(".laptop"), lamp = $("lamp"), ambient = $("ambient"), light = ambient.querySelector(".light");
+    ambient.hidden = false;
+    let pointer, frame = 0;
+    addEventListener("pointermove", (event) => {
+      pointer = event;
+      frame ||= requestAnimationFrame(() => {
+        frame = 0;
+        const box = laptop.getBoundingClientRect();
+        const x = Math.max(-1, Math.min(1, (pointer.clientX - box.left - box.width / 2) / (box.width / 2)));
+        const y = Math.max(-1, Math.min(1, (pointer.clientY - box.top - 260) / 400));
+        lamp.style.transform = `translate(${x * 380}px, ${y * 60}px)`;
+        const at = `translate(${pointer.clientX}px, ${pointer.clientY}px)`;
+        if (ambient.classList.contains("lit")) {
+          light.style.transform = at;
+        } else {
+          // Appear where the pointer is instead of sweeping in from the last spot.
+          light.style.transition = "none";
+          light.style.transform = at;
+          void light.offsetWidth;
+          light.style.transition = "";
+          ambient.classList.add("lit");
+        }
+      });
+    }, { passive: true });
+    document.documentElement.addEventListener("mouseleave", () => ambient.classList.remove("lit"));
+  }
+
+  // Things below the fold spring in as they arrive.
+  if (!still && "IntersectionObserver" in window) {
+    const io = new IntersectionObserver((entries) => {
+      for (const entry of entries) if (entry.isIntersecting) { entry.target.classList.add("in"); io.unobserve(entry.target); }
+    }, { rootMargin: "0px 0px -10% 0px" });
+    document.querySelectorAll(".pop, .rise").forEach((el, i) => {
+      if (el.getBoundingClientRect().top < innerHeight) return;
+      el.style.setProperty("--d", (i % 3) * 90 + "ms");
+      el.classList.add("armed");
+      io.observe(el);
+    });
+  }
+
+  // Popover: example history, ending now at 35% (5h) and 55% (7d), like the app's own chart.
+  const now = new Date(2026, 9, 21, 9, 41);
+  const step = 10 * 60 * 1000;
+  const history = [];
+  let seed = 7, five = 0, week = 0;
+  const rand = () => ((seed = (seed * 9301 + 49297) % 233280) / 233280);
+  for (let i = 30 * 144; i >= 0; i--) {
+    const t = new Date(now - i * step);
+    if ((i - 12) % 30 === 0) five = 0;
+    const hour = t.getHours();
+    if (hour >= 8 && hour <= 22) {
+      const bump = [0, 0, 0.4, 1, 1.8, 3][Math.floor(rand() * 6)];
+      five = Math.min(92, five + bump);
+      week += bump * 0.11;
+    }
+    if (t.getDay() === 6 && hour === 8 && t.getMinutes() >= 40 && t.getMinutes() < 50) week = 0;
+    history.push({ t, five, week });
+  }
+  const last = history[history.length - 1];
+  const scale = 55 / Math.max(last.week, 1);
+  history.forEach((p) => { p.week = Math.min(100, p.week * scale); });
+  const windowStart = history.length - 13;
+  const fit = 35 / Math.max(last.five, 1);
+  for (let i = windowStart; i < history.length; i++) history[i].five = Math.min(92, history[i].five * fit);
+
+  const ranges = {
+    "1h": { span: 3600e3, ticks: (d) => d.getMinutes() % 15 === 0, label: (d) => d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) },
+    "6h": { span: 6 * 3600e3, ticks: (d) => d.getMinutes() === 0 && d.getHours() % 2 === 0, label: (d) => d.toLocaleTimeString("en-US", { hour: "numeric" }) },
+    "1d": { span: 24 * 3600e3, ticks: (d) => d.getMinutes() === 0 && d.getHours() % 6 === 0, label: (d) => d.toLocaleTimeString("en-US", { hour: "numeric" }) },
+    "7d": { span: 7 * 24 * 3600e3, ticks: (d) => d.getHours() === 0 && d.getMinutes() === 0 && d.getDay() % 2 === 0, label: (d) => d.toLocaleDateString("en-US", { weekday: "short" }) },
+    "30d": { span: 30 * 24 * 3600e3, ticks: (d) => d.getHours() === 0 && d.getMinutes() === 0 && d.getDay() === 1, label: (d) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) },
+  };
+  const svg = $("chart"), tip = $("tip");
+  const W = 262, H = 92, top = 6;
+  const NS = "http://www.w3.org/2000/svg";
+  let shown = [], range = "1d";
+  const x = (t) => ((t - (now - ranges[range].span)) / ranges[range].span) * W;
+  const y = (v) => top + H - (v / 100) * H;
+  const el = (name, attrs, text) => { const n = document.createElementNS(NS, name); for (const k in attrs) n.setAttribute(k, attrs[k]); if (text) n.textContent = text; return n; };
+  function draw(animate) {
+    const span = ranges[range].span;
+    const inRange = history.filter((p) => p.t >= now - span);
+    const stride = Math.max(1, Math.floor(inRange.length / 140));
+    shown = inRange.filter((_, i) => i % stride === 0 || i === inRange.length - 1);
+    svg.replaceChildren();
+    for (const v of [0, 25, 50, 75, 100]) {
+      svg.append(el("line", { class: "grid", x1: 0, x2: W, y1: y(v), y2: y(v) }));
+      svg.append(el("text", { x: W + 5, y: y(v) + 2.5 }, v + "%"));
+    }
+    // Ticks fall on round times, so walk the range in 5-minute steps from a round start.
+    const tick = new Date(now - span);
+    tick.setSeconds(0, 0);
+    tick.setMinutes(Math.ceil(tick.getMinutes() / 5) * 5);
+    for (; tick <= now; tick.setMinutes(tick.getMinutes() + 5)) {
+      if (!ranges[range].ticks(tick)) continue;
+      const px = x(tick);
+      if (px < 14 || px > W - 10) continue;
+      svg.append(el("line", { class: "vgrid", x1: px, x2: px, y1: top, y2: top + H }));
+      svg.append(el("text", { x: px, y: top + H + 11, "text-anchor": "middle" }, ranges[range].label(tick)));
+    }
+    const path = (key) => shown.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)},${y(p[key]).toFixed(1)}`).join(" ");
+    const l7 = el("path", { class: "l7", d: path("week") });
+    const l5 = el("path", { class: "l5", d: path("five") });
+    svg.append(l7, l5);
+    svg.append(el("line", { class: "cursor", id: "cursor", x1: -10, x2: -10, y1: top, y2: top + H }));
+    if (animate && !still) {
+      for (const line of [l5, l7]) {
+        const len = line.getTotalLength();
+        line.animate([{ strokeDasharray: len, strokeDashoffset: len }, { strokeDasharray: len, strokeDashoffset: 0 }], { duration: 700, easing: "cubic-bezier(.22,1,.36,1)" });
+      }
+    }
+  }
+  document.querySelectorAll(".seg button").forEach((button) => {
+    button.addEventListener("click", () => {
+      document.querySelectorAll(".seg button").forEach((b) => b.setAttribute("aria-pressed", String(b === button)));
+      range = button.textContent.trim();
+      tip.hidden = true;
+      draw(true);
+    });
+  });
+  svg.addEventListener("pointermove", (event) => {
+    const box = svg.getBoundingClientRect();
+    const px = ((event.clientX - box.left) / box.width) * 300;
+    if (px < 0 || px > W) { tip.hidden = true; svg.classList.remove("hovering"); return; }
+    const target = now - ranges[range].span + (px / W) * ranges[range].span;
+    const p = shown.reduce((a, b) => (Math.abs(b.t - target) < Math.abs(a.t - target) ? b : a));
+    const cursor = svg.querySelector("#cursor");
+    cursor.setAttribute("x1", x(p.t)); cursor.setAttribute("x2", x(p.t));
+    tip.hidden = false;
+    svg.classList.add("hovering");
+    tip.style.left = (x(p.t) / 300) * 100 + "%";
+    const when = range === "7d" || range === "30d" ? p.t.toLocaleString("en-US", { weekday: "short", hour: "numeric" }) : p.t.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    tip.textContent = `${when} \u00b7 5h ${Math.round(p.five)}% \u00b7 7d ${Math.round(p.week)}%`;
+  });
+  svg.addEventListener("pointerleave", () => { tip.hidden = true; svg.classList.remove("hovering"); });
+  draw(false);
+
+  // Popover actions.
+  const popover = $("popover"), statusItem = $("status-item"), updated = $("updated");
+  const level = (v) => v >= 80 ? "red" : v >= 60 ? "yellow" : "green";
+  document.querySelectorAll(".popover .p-bar i").forEach((bar, i) => bar.style.setProperty("--i", i));
+  // Reopening restarts the spring; closing shrinks back toward the menu bar first.
+  const setOpen = (open) => {
+    statusItem.setAttribute("aria-expanded", String(open));
+    popover.classList.remove("first");
+    if (open) { popover.classList.remove("closing"); popover.hidden = false; return; }
+    if (still) { popover.hidden = true; return; }
+    popover.classList.add("closing");
+    popover.addEventListener("animationend", () => { if (popover.classList.contains("closing")) { popover.hidden = true; popover.classList.remove("closing"); } }, { once: true });
+  };
+  statusItem.addEventListener("click", () => setOpen(popover.hidden || popover.classList.contains("closing")));
+  $("quit").addEventListener("click", () => setOpen(false));
+  $("go-settings").addEventListener("click", () => $("start").scrollIntoView({ behavior: still ? "auto" : "smooth" }));
+  $("refresh").addEventListener("click", () => {
+    updated.textContent = "Updating\u2026";
+    setTimeout(() => {
+      last.five = Math.min(99, last.five + 1 + Math.round(Math.random()));
+      const five = Math.round(last.five);
+      document.querySelector('[data-pct="five"]').textContent = five + "%";
+      const bar = document.querySelector('[data-bar="five"]');
+      bar.style.setProperty("--v", five + "%");
+      bar.dataset.level = level(five);
+      statusItem.querySelector("b").style.setProperty("--v", five + "%");
+      updated.textContent = "Updated just now";
+      draw(false);
+    }, 700);
+  });
+
+  // Settings sliders show their value the way the app does.
+  document.querySelectorAll(".settings input").forEach((input) => {
+    input.addEventListener("input", () => {
+      document.querySelector(`[data-out="${input.id}"]`).textContent = input.value === "0" ? "Off" : input.value + "%";
+    });
+  });
+
+  // Alert demo: usage climbs, resets, and climbs again; crossing the threshold shows the app's notification.
+  const range5 = $("alert-at"), out = $("alert-out"), bar = $("usage-bar"), pct = $("usage-pct"), mark = $("usage-mark"), banner = $("banner"), text = $("banner-text");
+  let usage = 84, bannerShown = true;
+  const render = () => { bar.style.setProperty("--v", usage + "%"); bar.dataset.level = level(usage); pct.textContent = Math.round(usage) + "%"; };
+  const show = () => { if (bannerShown) return; banner.classList.remove("gone", "popin"); void banner.offsetWidth; banner.classList.add("popin"); bannerShown = true; };
+  const hide = () => { if (bannerShown) { banner.classList.add("gone"); bannerShown = false; } };
+  const sync = () => (usage >= +range5.value ? show() : hide());
+  range5.addEventListener("input", () => {
+    out.textContent = range5.value + "%";
+    mark.style.setProperty("--at", range5.value + "%");
+    text.textContent = `5-hour usage has reached ${range5.value}%`;
+    sync();
+  });
+  if (!still) {
+    setInterval(() => {
+      usage += 1.4 + Math.random() * 1.4;
+      if (usage >= 100) { usage = 12; hide(); }
+      render();
+      sync();
+    }, 260);
+  }
+
+})();
+</script>
+</body>
+</html>

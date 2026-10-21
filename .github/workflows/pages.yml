@@ -1,0 +1,52 @@
+# Builds and deploys the whole Pages site: the website from site/ on the default branch, plus the Sparkle appcast
+# attached to a release. A Pages deploy replaces the entire site, so every deploy has to carry both.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths: ['site/**', '.github/workflows/pages.yml']
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      tag:
+        description: Release whose appcast to publish. Defaults to the latest release.
+        type: string
+        default: ''
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # One job builds and deploys, and deploys run one at a time, so an older snapshot can't land after a newer one.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Assemble the site
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          mkdir -p dist/site
+          cp -R site/. dist/site/
+          gh release download ${TAG:+"$TAG"} --repo "$GITHUB_REPOSITORY" --pattern appcast.xml --dir dist/site --clobber
+          # Installed apps check this file for updates, so never deploy without a readable appcast.
+          python3 -c 'import xml.etree.ElementTree as ET; assert ET.parse("dist/site/appcast.xml").getroot().find("channel/item") is not None, "appcast.xml has no items"'
+
+      - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4.0.0
+        with:
+          path: dist/site
+
+      - id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
