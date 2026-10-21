@@ -121,8 +121,6 @@ code { font: 0.9em var(--mono); }
 .clock { margin-left: 3.5px; }
 
 .hero-copy { display: grid; justify-items: start; gap: 22px; align-self: center; padding-bottom: 40px; }
-.eyebrow-chip { display: inline-flex; align-items: center; gap: 8px; color: rgb(235 235 245 / .65); font-size: 16px; }
-.eyebrow-chip img { width: 22px; height: 22px; border-radius: 6px; }
 .hero h1 { font-size: clamp(40px, 4.6vw, 62px); font-weight: 800; line-height: 1.02; letter-spacing: -0.04em; }
 .accent { color: var(--accent-2); background: linear-gradient(90deg, #ef7b58, #ffb070); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
 .hero .lede { max-width: 28em; color: rgb(235 235 245 / .7); font-size: 18px; }
@@ -359,7 +357,6 @@ footer a:hover { color: var(--ink); }
         </div>
 
         <div class="hero-copy">
-          <span class="eyebrow-chip"><img src="icon.png" alt="">Claude Usage Bar for macOS</span>
           <h1>See your Claude limits <span class="accent">before you hit them.</span></h1>
           <p class="lede">A free, open-source menu bar app that tracks your 5-hour and weekly limits, shows when they reset, and notifies you before you run out.</p>
           <div class="ctas">
@@ -572,22 +569,22 @@ footer a:hover { color: var(--ink); }
       .catch(() => {});
   }
 
-  // What it tracks: one light snakes around the chips in a loop, easing to a stop on each one and darting to the next.
+  // What it tracks: one light circles the chips like a racetrack. It goes right over one chip and under the next, around
+  // the end of the last chip, back on the opposite edges, and around the end of the first, easing to a stop on each chip.
   // Positions are measured along the sequence of chips, not the screen, so it visits them in order even when the row wraps.
   const chips = document.querySelector(".strip ul");
-  let stops = [], rowLength = 0;
+  let pills = [];
   const measureChips = () => {
     const gap = parseFloat(getComputedStyle(chips).columnGap) || 0;
     let at = 0;
-    stops = [...chips.children].map((chip) => {
+    pills = [...chips.children].map((chip) => {
       const width = chip.offsetWidth;
       chip.style.setProperty("--ox", `${at}px`);
       chip.style.setProperty("--dc", `${at + width / 2 - 3}px`);
-      const centre = at + width / 2;
+      const pill = { centre: at + width / 2, width, radius: chip.offsetHeight / 2 };
       at += width + gap;
-      return centre;
+      return pill;
     });
-    rowLength = at;
   };
   measureChips();
   document.fonts?.ready.then(measureChips);
@@ -596,15 +593,36 @@ footer a:hover { color: var(--ink); }
     const leg = 1300;
     const easeInOutQuart = (u) => (u < 0.5 ? 8 * u ** 4 : 1 - (-2 * u + 2) ** 4 / 2);
     let frame = 0, start = 0;
-    // The row is a ring: after the last chip the light carries on into the first. Each stop flips between the top
-    // and bottom edge, so with an odd number of chips every chip swaps edges on the next lap.
+    // Stops on the way out (top, bottom, top, ...) and on the way back, on each chip's other edge.
+    const route = () => [
+      ...pills.map((_, i) => ({ i, y: i % 2 })),
+      ...pills.map((_, i) => ({ i, y: 1 - (i % 2) })).reverse(),
+    ];
+    // Partway (u from 0 to 1) around one end of a chip: along one edge, around the rounded end, back along the other.
+    const turn = (pill, fromY, u, side) => {
+      const straight = pill.width / 2 - pill.radius, arc = Math.PI * pill.radius, d = u * (2 * straight + arc);
+      const capCentre = pill.centre + side * straight;
+      if (d < straight) return [pill.centre + side * d, fromY];
+      if (d < straight + arc) {
+        const angle = (d - straight) / pill.radius;
+        return [capCentre + side * pill.radius * Math.sin(angle), fromY + (1 - 2 * fromY) * (0.5 - 0.5 * Math.cos(angle))];
+      }
+      return [capCentre - side * (d - straight - arc), 1 - fromY];
+    };
     const tick = (now) => {
       start ||= now;
-      const t = (now - start) / leg;
-      const k = Math.floor(t), e = easeInOutQuart(t - k), n = stops.length;
-      const from = stops[k % n], to = stops[(k + 1) % n] + (k % n === n - 1 ? rowLength : 0);
-      chips.style.setProperty("--bx", `${(from + (to - from) * e) % rowLength}px`);
-      chips.style.setProperty("--by", String(k % 2 === 0 ? e : 1 - e));
+      const stops = route(), t = (now - start) / leg;
+      const k = Math.floor(t) % stops.length, e = easeInOutQuart(t - Math.floor(t));
+      const from = stops[k], to = stops[(k + 1) % stops.length];
+      let x, y;
+      if (from.i === to.i) {
+        [x, y] = turn(pills[from.i], from.y, e, from.i === 0 ? -1 : 1);
+      } else {
+        x = pills[from.i].centre + (pills[to.i].centre - pills[from.i].centre) * e;
+        y = from.y + (to.y - from.y) * e;
+      }
+      chips.style.setProperty("--bx", `${x}px`);
+      chips.style.setProperty("--by", String(y));
       frame = requestAnimationFrame(tick);
     };
     const run = (on) => {
