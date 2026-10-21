@@ -12,8 +12,7 @@ struct ClaudeUsageBarApp: App {
             PopoverView(
                 service: service,
                 historyService: historyService,
-                notificationService: notificationService,
-                appUpdater: appUpdater
+                notificationService: notificationService
             )
         } label: {
             Image(nsImage: service.isAuthenticated
