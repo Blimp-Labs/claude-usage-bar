@@ -124,21 +124,15 @@ private func focusSettingsWindow() {
 
 struct LaunchAtLoginToggle: View {
     @StateObject private var model: LaunchAtLoginModel
-    /// nil means "inherit whatever the container provides". Forcing a size here
-    /// made this switch a different size from every other control in the
-    /// Settings form, which sets the ambient size for its section.
-    private let controlSize: ControlSize?
     private let useSwitchStyle: Bool
 
     init(
-        controlSize: ControlSize? = nil,
         useSwitchStyle: Bool = false,
         bundleURL: URL = Bundle.main.bundleURL
     ) {
         _model = StateObject(
             wrappedValue: LaunchAtLoginModel(bundleURL: bundleURL)
         )
-        self.controlSize = controlSize
         self.useSwitchStyle = useSwitchStyle
     }
 
@@ -162,26 +156,10 @@ struct LaunchAtLoginToggle: View {
         ))
         .disabled(!model.isSupported)
 
-        let sized = baseToggle.modifier(OptionalControlSize(controlSize: controlSize))
-
         if useSwitchStyle {
-            sized.toggleStyle(.switch)
+            baseToggle.toggleStyle(.switch)
         } else {
-            sized
-        }
-    }
-}
-
-/// Applies `.controlSize` only when one was requested, so the default is to
-/// inherit the container's.
-private struct OptionalControlSize: ViewModifier {
-    let controlSize: ControlSize?
-
-    func body(content: Content) -> some View {
-        if let controlSize {
-            content.controlSize(controlSize)
-        } else {
-            content
+            baseToggle
         }
     }
 }

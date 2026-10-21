@@ -183,7 +183,8 @@ private struct SetupView: View {
 
         Divider()
 
-        LaunchAtLoginToggle(controlSize: .small, useSwitchStyle: true)
+        LaunchAtLoginToggle(useSwitchStyle: true)
+            .controlSize(.small)
 
         Divider()
 
