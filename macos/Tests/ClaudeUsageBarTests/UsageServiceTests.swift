@@ -1,3 +1,4 @@
+import CryptoKit
 import XCTest
 @testable import ClaudeUsageBar
 
@@ -689,6 +690,107 @@ final class UsageServiceTests: XCTestCase {
         XCTAssertFalse(service.isAwaitingCode)
         XCTAssertFalse(service.isAuthenticated)
         XCTAssertEqual(service.lastError, "Missing OAuth state — expected code#state format")
+    }
+
+    func testSubmitOAuthCodeWithMatchingStateSignsIn() async throws {
+        let store = try makeStore()
+        var openedURL: URL?
+        var tokenRequestBody: [String: String]?
+
+        MockURLProtocol.handler = { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("POST", "/v1/oauth/token"):
+                tokenRequestBody = Self.jsonBody(for: request)
+                return try Self.httpResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    body: """
+                    {
+                      "access_token": "signed-in-access",
+                      "refresh_token": "signed-in-refresh",
+                      "expires_in": 3600,
+                      "scope": "user:profile user:inference"
+                    }
+                    """
+                )
+            case ("GET", "/api/oauth/usage"):
+                return try Self.httpResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    body: """
+                    {
+                      "five_hour": { "utilization": 12, "resets_at": "2026-03-08T18:00:00Z" },
+                      "seven_day": { "utilization": 20, "resets_at": "2026-03-15T18:00:00Z" }
+                    }
+                    """
+                )
+            default:
+                XCTFail("Unexpected request: \(request)")
+                return try Self.httpResponse(url: request.url!, statusCode: 500)
+            }
+        }
+
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: URL(string: "https://example.com/api/oauth/usage")!,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
+            credentialsStore: store,
+            localProfileLoader: { "user@example.com" },
+            urlOpener: { url in
+                openedURL = url
+                return true
+            }
+        )
+        // Sign-in starts polling; stop it so it can't reach a later test's handler.
+        defer { service.signOut() }
+
+        service.startOAuthFlow()
+        let query = try XCTUnwrap(
+            openedURL.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems }
+        )
+        let state = try XCTUnwrap(query.first { $0.name == "state" }?.value)
+        let challenge = try XCTUnwrap(query.first { $0.name == "code_challenge" }?.value)
+
+        await service.submitOAuthCode("auth-code#\(state)")
+
+        XCTAssertTrue(service.isAuthenticated)
+        XCTAssertFalse(service.isAwaitingCode)
+        XCTAssertNil(service.lastError)
+
+        let body = try XCTUnwrap(tokenRequestBody)
+        XCTAssertEqual(body["grant_type"], "authorization_code")
+        XCTAssertEqual(body["code"], "auth-code")
+        XCTAssertEqual(body["state"], state)
+        XCTAssertEqual(body["redirect_uri"], query.first { $0.name == "redirect_uri" }?.value)
+        let verifier = try XCTUnwrap(body["code_verifier"])
+        XCTAssertEqual(Data(SHA256.hash(data: Data(verifier.utf8))).base64URLEncoded(), challenge)
+
+        let saved = try XCTUnwrap(store.load(defaultScopes: UsageService.defaultOAuthScopes))
+        XCTAssertEqual(saved.accessToken, "signed-in-access")
+    }
+
+    func testSubmitOAuthCodeRejectsMismatchedState() async throws {
+        MockURLProtocol.handler = { request in
+            XCTFail("No network request should be made when state doesn't match")
+            return try Self.httpResponse(url: request.url!, statusCode: 500)
+        }
+
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: URL(string: "https://example.com/api/oauth/usage")!,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
+            credentialsStore: try makeStore(),
+            urlOpener: { _ in true }
+        )
+
+        service.startOAuthFlow()
+        await service.submitOAuthCode("auth-code#not-the-state")
+
+        XCTAssertFalse(service.isAuthenticated)
+        XCTAssertFalse(service.isAwaitingCode)
+        XCTAssertEqual(service.lastError, "OAuth state mismatch — try again")
     }
 
     func testStartOAuthFlowFailsCleanlyWhenBrowserCannotOpen() throws {
