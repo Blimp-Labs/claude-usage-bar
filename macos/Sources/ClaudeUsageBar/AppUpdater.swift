@@ -19,20 +19,7 @@ final class AppUpdater: ObservableObject {
     @Published private(set) var canCheckForUpdates = false
     @Published private(set) var isConfigured: Bool
     @Published private(set) var lastError: String?
-
-    @Published var automaticallyChecksForUpdates: Bool {
-        didSet {
-            guard isConfigured else { return }
-
-            // Disabling stops cycles, so nothing else would clear a stale error.
-            if !automaticallyChecksForUpdates {
-                lastError = nil
-            }
-
-            guard updaterController.updater.automaticallyChecksForUpdates != automaticallyChecksForUpdates else { return }
-            updaterController.updater.automaticallyChecksForUpdates = automaticallyChecksForUpdates
-        }
-    }
+    @Published private(set) var automaticallyChecksForUpdates: Bool
 
     private let updaterController: SPUStandardUpdaterController
     private let delegate: UpdaterDelegate
@@ -91,6 +78,17 @@ final class AppUpdater: ObservableObject {
         guard isConfigured else { return }
 
         updaterController.checkForUpdates(nil)
+    }
+
+    func setAutomaticallyChecksForUpdates(_ enabled: Bool) {
+        guard isConfigured else { return }
+
+        // Disabling stops cycles, so nothing else would clear a stale error.
+        if !enabled {
+            lastError = nil
+        }
+        automaticallyChecksForUpdates = enabled
+        updaterController.updater.automaticallyChecksForUpdates = enabled
     }
 
     /// Outcomes Sparkle itself treats as routine: no update, prompt dismissed, install deferred.
