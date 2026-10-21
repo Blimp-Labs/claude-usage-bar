@@ -65,7 +65,10 @@ struct SettingsWindowContent: View {
                 }
 
                 if appUpdater.isConfigured {
-                    Toggle("Check daily for updates", isOn: $appUpdater.automaticallyChecksForUpdates)
+                    Toggle("Check daily for updates", isOn: Binding(
+                        get: { appUpdater.automaticallyChecksForUpdates },
+                        set: { appUpdater.setAutomaticallyChecksForUpdates($0) }
+                    ))
 
                     Button("Check for Updates…") {
                         appUpdater.checkForUpdates()
