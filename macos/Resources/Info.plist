@@ -21,7 +21,7 @@
     <key>CFBundleIconName</key>
     <string>AppIcon</string>
     <key>LSUIElement</key>
-    <true/>
+    <false/>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>SUEnableAutomaticChecks</key>

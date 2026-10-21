@@ -13,6 +13,12 @@ private let iconWidth: CGFloat = logoSize + logoGap + barsWidth
 private let iconHeight: CGFloat = 18
 private let fontSize: CGFloat = 8
 
+// Layout for percentage text mode
+private let pctFontSize: CGFloat = 9
+private let pctRowGap: CGFloat = 1
+private let pctLabelGap: CGFloat = 1
+private let pctIconLogoGap: CGFloat = 3
+
 private struct CachedLabel {
     let string: NSAttributedString
     let size: NSSize
@@ -38,20 +44,50 @@ private func drawRow(label: String, barX: CGFloat, barY: CGFloat, labelX: CGFloa
 }
 
 func renderIcon(pct5h: Double, pct7d: Double) -> NSImage {
-    let image = NSImage(size: NSSize(width: iconWidth, height: iconHeight), flipped: true) { _ in
-        let offset = logoSize + logoGap
-        let barX = offset + labelWidth + labelGap
-        let topY = (iconHeight - barHeight * 2 - rowGap) / 2
-        let bottomY = topY + barHeight + rowGap
+    // Render percentage text alongside the Claude logo
+    let font = NSFont.monospacedSystemFont(ofSize: pctFontSize, weight: .semibold)
+    let labelFont = NSFont.monospacedSystemFont(ofSize: 7, weight: .regular)
 
+    let pct5hInt = Int(round(min(max(pct5h, 0), 1) * 100))
+    let pct7dInt = Int(round(min(max(pct7d, 0), 1) * 100))
+
+    let attrs5h: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
+    let attrs7d: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
+    let labelAttrs: [NSAttributedString.Key: Any] = [.font: labelFont, .foregroundColor: NSColor.black.withAlphaComponent(0.6)]
+
+    let str5h = NSAttributedString(string: "\(pct5hInt)%", attributes: attrs5h)
+    let str7d = NSAttributedString(string: "\(pct7dInt)%", attributes: attrs7d)
+    let lbl5h = NSAttributedString(string: "5h", attributes: labelAttrs)
+    let lbl7d = NSAttributedString(string: "7d", attributes: labelAttrs)
+
+    let size5h = str5h.size()
+    let size7d = str7d.size()
+    let lblSize5h = lbl5h.size()
+    let lblSize7d = lbl7d.size()
+
+    // Each row: "5h " + "XX%"
+    let row1Width = lblSize5h.width + pctLabelGap + size5h.width
+    let row2Width = lblSize7d.width + pctLabelGap + size7d.width
+    let textWidth = max(row1Width, row2Width)
+    let totalWidth = logoSize + pctIconLogoGap + textWidth + 2
+
+    let image = NSImage(size: NSSize(width: totalWidth, height: iconHeight), flipped: true) { _ in
         drawClaudeLogo(x: 0, y: (iconHeight - logoSize) / 2, size: logoSize)
 
-        drawRow(label: "5h", barX: barX, barY: topY, labelX: offset) { x, y in
-            drawBar(x: x, y: y, width: barWidth, height: barHeight, cornerRadius: cornerRadius, pct: pct5h)
-        }
-        drawRow(label: "7d", barX: barX, barY: bottomY, labelX: offset) { x, y in
-            drawBar(x: x, y: y, width: barWidth, height: barHeight, cornerRadius: cornerRadius, pct: pct7d)
-        }
+        let textX = logoSize + pctIconLogoGap
+        let rowHeight = max(size5h.height, lblSize5h.height)
+        let totalTextHeight = rowHeight * 2 + pctRowGap
+        let topY = (iconHeight - totalTextHeight) / 2
+        let bottomY = topY + rowHeight + pctRowGap
+
+        // Row 1: "5h XX%"
+        lbl5h.draw(at: NSPoint(x: textX, y: topY + (rowHeight - lblSize5h.height) / 2))
+        str5h.draw(at: NSPoint(x: textX + lblSize5h.width + pctLabelGap, y: topY + (rowHeight - size5h.height) / 2))
+
+        // Row 2: "7d XX%"
+        lbl7d.draw(at: NSPoint(x: textX, y: bottomY + (rowHeight - lblSize7d.height) / 2))
+        str7d.draw(at: NSPoint(x: textX + lblSize7d.width + pctLabelGap, y: bottomY + (rowHeight - size7d.height) / 2))
+
         return true
     }
     image.isTemplate = true
@@ -59,20 +95,35 @@ func renderIcon(pct5h: Double, pct7d: Double) -> NSImage {
 }
 
 func renderUnauthenticatedIcon() -> NSImage {
-    let image = NSImage(size: NSSize(width: iconWidth, height: iconHeight), flipped: true) { _ in
-        let offset = logoSize + logoGap
-        let barX = offset + labelWidth + labelGap
-        let topY = (iconHeight - barHeight * 2 - rowGap) / 2
-        let bottomY = topY + barHeight + rowGap
+    let font = NSFont.monospacedSystemFont(ofSize: pctFontSize, weight: .semibold)
+    let labelFont = NSFont.monospacedSystemFont(ofSize: 7, weight: .regular)
+    let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black.withAlphaComponent(0.4)]
+    let labelAttrs: [NSAttributedString.Key: Any] = [.font: labelFont, .foregroundColor: NSColor.black.withAlphaComponent(0.3)]
 
+    let strDash = NSAttributedString(string: "--%", attributes: attrs)
+    let lbl5h = NSAttributedString(string: "5h", attributes: labelAttrs)
+    let lbl7d = NSAttributedString(string: "7d", attributes: labelAttrs)
+
+    let sizeDash = strDash.size()
+    let lblSize = lbl5h.size()
+    let textWidth = lblSize.width + pctLabelGap + sizeDash.width
+    let totalWidth = logoSize + pctIconLogoGap + textWidth + 2
+
+    let image = NSImage(size: NSSize(width: totalWidth, height: iconHeight), flipped: true) { _ in
         drawClaudeLogo(x: 0, y: (iconHeight - logoSize) / 2, size: logoSize)
 
-        drawRow(label: "5h", barX: barX, barY: topY, labelX: offset) { x, y in
-            drawDashedBar(x: x, y: y, width: barWidth, height: barHeight, cornerRadius: cornerRadius)
-        }
-        drawRow(label: "7d", barX: barX, barY: bottomY, labelX: offset) { x, y in
-            drawDashedBar(x: x, y: y, width: barWidth, height: barHeight, cornerRadius: cornerRadius)
-        }
+        let textX = logoSize + pctIconLogoGap
+        let rowHeight = max(sizeDash.height, lblSize.height)
+        let totalTextHeight = rowHeight * 2 + pctRowGap
+        let topY = (iconHeight - totalTextHeight) / 2
+        let bottomY = topY + rowHeight + pctRowGap
+
+        lbl5h.draw(at: NSPoint(x: textX, y: topY + (rowHeight - lblSize.height) / 2))
+        strDash.draw(at: NSPoint(x: textX + lblSize.width + pctLabelGap, y: topY + (rowHeight - sizeDash.height) / 2))
+
+        lbl7d.draw(at: NSPoint(x: textX, y: bottomY + (rowHeight - lblSize.height) / 2))
+        strDash.draw(at: NSPoint(x: textX + lblSize.width + pctLabelGap, y: bottomY + (rowHeight - sizeDash.height) / 2))
+
         return true
     }
     image.isTemplate = true
