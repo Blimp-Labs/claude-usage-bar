@@ -5,6 +5,7 @@ struct PopoverView: View {
     @ObservedObject var historyService: UsageHistoryService
     @ObservedObject var notificationService: NotificationService
     @AppStorage("setupComplete") private var setupComplete = false
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -151,8 +152,9 @@ struct PopoverView: View {
     }
 
     private var settingsButton: some View {
-        SettingsLink {
-            Text("Settings…")
+        Button("Settings…") {
+            openSettings()
+            focusSettingsWindow()
         }
         .buttonStyle(.borderless)
         .font(.caption)

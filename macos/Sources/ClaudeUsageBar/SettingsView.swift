@@ -96,11 +96,14 @@ struct SettingsWindowContent: View {
     }
 }
 
+/// SwiftUI orders Settings front only within this app, and a menu bar app isn't
+/// frontmost, so an already-open Settings window would stay behind other apps.
 @MainActor
-private func focusSettingsWindow() {
+func focusSettingsWindow() {
     DispatchQueue.main.async {
         NSApp.activate(ignoringOtherApps: true)
-        if let window = NSApp.windows.last(where: { $0.isVisible && $0.canBecomeKey }) {
+        // Settings is the only titled window; the popover and status item aren't.
+        if let window = NSApp.windows.first(where: { $0.isVisible && $0.styleMask.contains(.titled) }) {
             window.makeKeyAndOrderFront(nil)
             window.orderFrontRegardless()
         }
