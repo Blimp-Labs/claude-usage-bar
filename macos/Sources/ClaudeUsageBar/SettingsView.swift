@@ -60,7 +60,7 @@ struct SettingsWindowContent: View {
 
             Section("Updates") {
                 LabeledContent("Version") {
-                    Text(Self.appVersion)
+                    Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown")
                         .textSelection(.enabled)
                 }
 
@@ -93,21 +93,6 @@ struct SettingsWindowContent: View {
         .onAppear {
             focusSettingsWindow()
         }
-    }
-}
-
-extension SettingsWindowContent {
-    static var appVersion: String {
-        displayVersion(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
-    }
-
-    /// `CFBundleVersion` is derived from the version string by build.sh
-    /// (0.0.10 -> 10), so appending it would only restate the number beside it.
-    /// The marketing version stands alone.
-    static func displayVersion(_ shortVersion: String?) -> String {
-        let trimmed = shortVersion?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let trimmed, !trimmed.isEmpty else { return "unknown" }
-        return trimmed
     }
 }
 
