@@ -80,31 +80,9 @@ scripts/
 └── mock-server.py                   # Local mock API for development
 ```
 
-## Publishing releases
+## Releases
 
-Releases are tag-driven. Pushing a `v*` tag triggers the GitHub Actions workflow that:
-
-- builds the release app bundle once
-- produces both a ZIP (for Sparkle) and a DMG (for manual drag-to-Applications installs)
-- verifies the packaged artifacts before publishing
-- uploads those exact artifacts to the GitHub Release
-- reuses GitHub-generated release notes for both the release body and the Sparkle update entry
-- generates a signed Sparkle appcast from that zip
-- deploys the appcast to GitHub Pages
-
-One-time repository setup:
-
-1. Enable GitHub Pages with source `GitHub Actions`
-2. Add the `SPARKLE_PRIVATE_KEY` repository secret
-
-Local source builds intentionally leave `SUFeedURL` unset, so Sparkle stays disabled unless your packaging flow injects a feed URL. This prevents forks and dev builds from auto-updating to upstream releases.
-
-To export the current private key from your local Keychain:
-
-```sh
-.build/artifacts/sparkle/Sparkle/bin/generate_keys --account claude-usage-bar -x /tmp/claude-usage-bar.sparkle.key
-gh secret set SPARKLE_PRIVATE_KEY < /tmp/claude-usage-bar.sparkle.key
-```
+The maintainer cuts releases from `main` by pushing a version tag. PRs don't need to bump the version or touch the release workflow.
 
 ## Testing with the mock server
 
