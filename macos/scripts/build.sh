@@ -49,24 +49,28 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
+# Sparkle only offers an update whose CFBundleVersion is higher, so anything but
+# X.Y.Z (e.g. "1.0", "1.0.0-beta") would ship a release nobody is offered.
 version_to_build_number() {
-    local version="$1"
-    version="${version#v}"
+    local version="${1#v}"
 
-    if [[ "$version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+    if [[ "$version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] \
+        && (( 10#${BASH_REMATCH[2]} < 1000 && 10#${BASH_REMATCH[3]} < 1000 )); then
         printf '%d' "$((10#${BASH_REMATCH[1]} * 1000000 + 10#${BASH_REMATCH[2]} * 1000 + 10#${BASH_REMATCH[3]}))"
         return
     fi
 
-    if [[ "$version" =~ ^[0-9]+$ ]]; then
-        printf '%s' "$version"
-        return
-    fi
-
-    printf '%s' "$version"
+    echo "Error: version '$1' must be X.Y.Z with minor and patch below 1000." >&2
+    return 1
 }
 
 build_app_bundle() {
+    # Resolved before the slow build so a bad tag fails fast. Not `local x=$(...)`,
+    # which would hide the failure from `set -e`.
+    local app_version app_build
+    app_version="${APP_VERSION:-$($PLIST_BUDDY -c 'Print :CFBundleShortVersionString' "$PROJECT_DIR/Resources/Info.plist")}"
+    app_build="${APP_BUILD:-$(version_to_build_number "$app_version")}"
+
     echo "==> Building release binary..."
     swift build -c release
 
@@ -83,9 +87,6 @@ build_app_bundle() {
 
     cp "$PROJECT_DIR/Resources/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
     cp "$binary" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
-
-    local app_version="${APP_VERSION:-$($PLIST_BUDDY -c 'Print :CFBundleShortVersionString' "$PROJECT_DIR/Resources/Info.plist")}"
-    local app_build="${APP_BUILD:-$(version_to_build_number "$app_version")}"
 
     "$PLIST_BUDDY" -c "Set :CFBundleShortVersionString $app_version" "$APP_BUNDLE/Contents/Info.plist"
     "$PLIST_BUDDY" -c "Set :CFBundleVersion $app_build" "$APP_BUNDLE/Contents/Info.plist"
