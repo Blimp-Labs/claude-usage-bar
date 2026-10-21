@@ -4,7 +4,6 @@ struct PopoverView: View {
     @ObservedObject var service: UsageService
     @ObservedObject var historyService: UsageHistoryService
     @ObservedObject var notificationService: NotificationService
-    @ObservedObject var appUpdater: AppUpdater
     @AppStorage("setupComplete") private var setupComplete = false
 
     var body: some View {
@@ -94,13 +93,6 @@ struct PopoverView: View {
         if let error = service.lastError {
             Divider()
             Label(error, systemImage: "exclamationmark.triangle")
-                .foregroundStyle(.red)
-                .font(.caption)
-        }
-
-        if let updaterError = appUpdater.lastError {
-            Divider()
-            Label(updaterError, systemImage: "arrow.triangle.2.circlepath.circle")
                 .foregroundStyle(.red)
                 .font(.caption)
         }
