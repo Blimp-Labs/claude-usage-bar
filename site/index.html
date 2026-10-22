@@ -31,7 +31,7 @@
   :root { --pop: linear(0, 0.0153, 0.0549, 0.1111, 0.1776, 0.2497, 0.3237, 0.397, 0.4677, 0.5343, 0.5962, 0.6527, 0.7038, 0.7494, 0.7898, 0.8251, 0.8559, 0.8823, 0.9049, 0.924, 0.9401, 0.9535, 0.9646, 0.9736, 0.981, 0.9868, 0.9915, 0.9951, 0.9978, 0.9999, 1.0014, 1.0024, 1.0031, 1.0035, 1.0037, 1.0038, 1.0037, 1.0035, 1.0033, 1.003, 1); }
 }
 
-body { background: var(--page); color: var(--ink); font: 400 17px/1.5 var(--text); -webkit-font-smoothing: antialiased; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 400 17px/1.5 var(--text); -webkit-font-smoothing: antialiased; }
 body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 30; background: var(--page); }
 a { color: inherit; text-decoration: none; }
 a:focus-visible, button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 8px; }
@@ -75,8 +75,8 @@ code { font: 0.9em var(--mono); }
 .btn.small svg { width: 16px; height: 16px; }
 
 /* Hero: a Mac screen lit from behind. A thin bright rim hugs its edges, a softer light behind it leans toward the pointer, and film grain moves through the glow. */
-.hero { position: relative; isolation: isolate; padding-top: 72px; }
-.laptop { position: relative; padding: 14px 14px 0; border-radius: 58px 58px 0 0; background: var(--bezel); box-shadow: inset 0 0 0 2px var(--bezel-edge); }
+.hero { position: relative; isolation: isolate; display: grid; padding-top: 72px; }
+.laptop { position: relative; display: grid; padding: 14px 14px 0; border-radius: 58px 58px 0 0; background: var(--bezel); box-shadow: inset 0 0 0 2px var(--bezel-edge); }
 .backlight {
   --bx: max(260px, calc(50vw - 600px));
   position: absolute; inset: -260px calc(-1 * var(--bx)) 0; z-index: -1; pointer-events: none; overflow: hidden; background: var(--page);
@@ -113,15 +113,19 @@ code { font: 0.9em var(--mono); }
   position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 40px; align-items: start;
   min-height: 680px; padding: 132px 72px 110px; border-radius: 44px 44px 0 0; background: var(--screen); color: #f5f5f7; overflow: hidden;
 }
-/* The menu bar at real size (1pt = 1px), measured from macOS: the app's status item as its own renderer draws it, then the battery, Wi-Fi, Spotlight and Control Center glyphs, and the clock in 13pt. */
-.menubar { position: absolute; top: 0; left: 0; right: 0; height: 30px; display: flex; align-items: center; justify-content: flex-end; gap: 20px; padding: 0 20px; font-size: 13px; -webkit-font-smoothing: auto; }
+/* The menu bar at real size (1pt = 1px), measured from macOS: the app's status item as its own renderer draws it, then the battery, Wi-Fi, Spotlight and Control Center glyphs, and the clock in 13pt.
+   macOS ends the clock 19.5pt from a square screen edge; the inset adds what the rounded corner takes back at text height. */
+.menubar { position: absolute; top: 0; left: 0; right: 0; height: 30px; display: flex; align-items: center; justify-content: flex-end; gap: 20px; padding: 0 36px; font-size: 13px; -webkit-font-smoothing: auto; }
 .menubar svg { display: block; flex: none; fill: #fff; }
 .status-item { display: grid; place-items: center; height: 24px; padding: 0 6px; border-radius: 6px; transition: background .2s; }
 .status-item[aria-expanded="true"] { background: rgb(255 255 255 / .2); }
 .status-item i { width: 56px; height: 18px; background: #fff; -webkit-mask: url(status-item.png) center / 100% no-repeat; mask: url(status-item.png) center / 100% no-repeat; }
 .clock { margin-left: 3.5px; }
 
-.hero-copy { display: grid; justify-items: start; gap: 22px; align-self: center; padding-bottom: 40px; }
+/* The copy comes before the laptop so phones show it first. Wider screens lay it over the screen's left column, beside the popover:
+   the margins are the laptop's and the screen's padding, plus the popover's column on the right. */
+.hero > * { grid-area: 1 / 1; }
+.hero-copy { position: relative; z-index: 1; display: grid; justify-items: start; gap: 22px; align-self: center; margin: 146px 486px 150px 86px; }
 .hero h1 { font-size: clamp(40px, 4.6vw, 62px); font-weight: 800; line-height: 1.02; letter-spacing: -0.04em; }
 .accent { color: var(--accent-2); background: linear-gradient(90deg, #ef7b58, #ffb070); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
 .hero .lede { max-width: 28em; color: rgb(235 235 245 / .7); font-size: 18px; }
@@ -132,7 +136,7 @@ code { font: 0.9em var(--mono); }
 
 /* The popover, rebuilt from the app's dark appearance. */
 .popover {
-  position: relative; z-index: 2; margin-top: -92px; padding: 16px 16px 12px; border-radius: 16px; color: var(--pop-ink);
+  position: relative; z-index: 2; grid-column: 2; margin-top: -92px; padding: 16px 16px 12px; border-radius: 16px; color: var(--pop-ink);
   background: var(--pop-bg); box-shadow: 0 0 0 1px var(--pop-line), 0 24px 60px -20px rgb(0 0 0 / .8);
   font-size: 13px; transform-origin: 79px -8px; will-change: transform;
   animation: pop-open .19s var(--pop) both, fade-in .1s ease-out both;
@@ -301,20 +305,27 @@ footer a:hover { color: var(--ink); }
 @keyframes fill { from { width: 0; } }
 
 @media (max-width: 1000px) {
-  .screen { grid-template-columns: minmax(0, 1fr); padding: 96px 32px 72px; gap: 36px; }
-  .popover { margin-top: 0; max-width: 380px; width: 100%; justify-self: center; }
-  .hero-copy { padding-bottom: 0; }
-  .menubar .hide-narrow { display: none; }
+  .hero > * { grid-area: auto; }
+  .hero-copy { align-self: auto; margin: 0 0 56px; }
+  .screen { grid-template-columns: minmax(0, 1fr); min-height: 0; padding: 40px 72px 64px; }
+  /* With the copy above it, the backlight fades in from the top instead of starting at a hard edge. */
+  .backlight { -webkit-mask-image: linear-gradient(transparent 120px, #000 255px, #000 52%, transparent 96%); mask-image: linear-gradient(transparent 120px, #000 255px, #000 52%, transparent 96%); }
+  .popover { grid-column: auto; margin-top: 0; justify-self: end; width: min(328px, calc(100vw - 104px)); }
   .steps, .features, .try, .more { grid-template-columns: minmax(0, 1fr); }
   .links { display: none; }
   .nav-inner { justify-content: space-between; }
 }
 @media (max-width: 640px) {
   .ascii { font-size: 8px; }
-  .laptop { padding: 8px 8px 0; border-radius: 34px 34px 0 0; }
-  .screen { padding: 72px 20px 64px; border-radius: 26px 26px 0 0; }
-  .menubar { padding: 0 16px; gap: 12px; }
-  .frame { padding: 0 0 32px; }
+  /* Phones: the laptop runs off the left edge so its right side, with the menu bar and popover, fills the width, and the frame below spans the same width. */
+  .laptop { margin-left: -120px; padding: 8px 8px 0; border-radius: 34px 34px 0 0; }
+  .hero { padding-top: 40px; }
+  .hero .ctas { justify-self: stretch; display: grid; }
+  .hero .btn { justify-content: center; }
+  .hero .fine { justify-self: center; }
+  .screen { padding: 40px 12px 64px; border-radius: 26px 26px 0 0; }
+  .menubar { padding: 0 24px; gap: 10px; }
+  .frame { margin-inline: -16px; padding: 0 16px 32px; }
   .frame::before, .frame::after, .seam::before, .seam::after { display: none; }
   .seam { margin: 0; }
   .block { padding-block: 56px; }
@@ -345,29 +356,29 @@ footer a:hover { color: var(--ink); }
   </header>
 
   <section class="hero wide" id="top">
+    <div class="hero-copy">
+      <h1>See your Claude limits <span class="accent">before you hit them.</span></h1>
+      <p class="lede">A free, open-source menu bar app that tracks your 5-hour and weekly limits, shows when they reset, and notifies you before you run out.</p>
+      <div class="ctas">
+        <a class="btn" href="https://github.com/Blimp-Labs/claude-usage-bar/releases/latest/download/ClaudeUsageBar.dmg">
+          <svg viewBox="0 1 16.56 19.31" fill="currentColor" aria-hidden="true"><path d="M12.539 5.648C10.957 5.531 9.590 6.547 8.857 6.547C8.096 6.547 6.924 5.688 5.664 5.707C4.033 5.717 2.539 6.654 1.680 8.109C0.000 11.059 1.270 15.434 2.910 17.807C3.711 18.998 4.687 20.307 5.957 20.268C7.168 20.209 7.627 19.467 9.111 19.467C10.596 19.467 10.986 20.268 12.275 20.229C13.604 20.209 14.414 19.047 15.244 17.875C16.162 16.498 16.553 15.190 16.562 15.121C16.523 15.121 14.004 14.145 13.984 11.234C13.965 8.803 15.977 7.611 16.055 7.563C14.912 5.893 13.145 5.707 12.539 5.648ZM11.553 4.076C12.227 3.256 12.676 2.133 12.559 1.000C11.592 1.029 10.420 1.645 9.717 2.455C9.111 3.178 8.564 4.340 8.711 5.434C9.795 5.512 10.889 4.887 11.553 4.076Z"/></svg>
+          Download for Mac
+        </a>
+        <a class="btn outline" href="https://github.com/Blimp-Labs/claude-usage-bar">View on GitHub</a>
+      </div>
+      <p class="fine">Free &amp; open source &middot; macOS 14 or later</p>
+    </div>
+
     <div class="laptop">
       <div class="backlight" id="backlight" aria-hidden="true"><i class="lamp" id="lamp"></i><i class="rim"></i><i class="grain"></i></div>
       <div class="screen">
         <div class="menubar">
           <button class="status-item" id="status-item" type="button" aria-expanded="true" aria-controls="popover" aria-label="Claude Usage Bar menu"><i></i></button>
-          <svg class="hide-narrow" width="25.5" height="12" viewBox="0 0 25.5 12" aria-hidden="true"><rect x=".5" y=".5" width="22" height="11" rx="2.25" fill="none" stroke="#fff" stroke-opacity=".5"/><rect x="2" y="2" width="14.25" height="8" rx="1.25"/><path d="M24 4h.25c.69 0 1.25.56 1.25 1.25v1.5c0 .69-.56 1.25-1.25 1.25H24z" fill-opacity=".6"/></svg>
-          <svg class="hide-narrow" width="17.30" height="12.48" viewBox="1.00 1.00 17.30 12.48" aria-hidden="true"><path d="M2.195 6.337C2.361 6.512 2.626 6.509 2.795 6.325C4.612 4.407 6.986 3.396 9.650 3.396C12.332 3.396 14.720 4.408 16.528 6.335C16.686 6.501 16.942 6.492 17.112 6.320L18.150 5.286C18.302 5.128 18.302 4.918 18.173 4.765C16.391 2.561 13.070 1.000 9.650 1.000C6.238 1.000 2.915 2.560 1.129 4.765C1.000 4.918 1.007 5.128 1.157 5.286ZM5.273 9.377C5.455 9.561 5.707 9.540 5.888 9.347C6.791 8.370 8.214 7.702 9.650 7.709C11.103 7.702 12.529 8.392 13.448 9.374C13.614 9.557 13.847 9.546 14.035 9.372L15.199 8.250C15.344 8.106 15.359 7.903 15.231 7.745C14.065 6.353 11.952 5.361 9.650 5.361C7.350 5.361 5.238 6.354 4.076 7.745C3.943 7.903 3.952 8.095 4.109 8.250ZM9.653 13.482C9.844 13.482 10.004 13.395 10.308 13.104L12.117 11.362C12.257 11.226 12.286 11.006 12.156 10.846C11.626 10.171 10.683 9.649 9.653 9.649C8.597 9.649 7.637 10.196 7.107 10.912C7.013 11.052 7.061 11.232 7.198 11.362L8.999 13.104C9.304 13.389 9.468 13.482 9.653 13.482Z"/></svg>
-          <svg class="hide-narrow" width="12.53" height="12.65" viewBox="1.00 1.00 12.53 12.65" aria-hidden="true"><path d="M1.000 6.167C1.000 9.019 3.316 11.329 6.167 11.329C7.224 11.329 8.197 11.007 9.008 10.453L11.924 13.377C12.109 13.558 12.351 13.645 12.601 13.645C13.140 13.645 13.529 13.235 13.529 12.705C13.529 12.453 13.435 12.221 13.267 12.041L10.367 9.135C10.973 8.301 11.329 7.278 11.329 6.167C11.329 3.316 9.018 1.000 6.167 1.000C3.316 1.000 1.000 3.316 1.000 6.167ZM2.321 6.167C2.321 4.043 4.041 2.321 6.167 2.321C8.287 2.321 10.014 4.043 10.014 6.167C10.014 8.287 8.287 10.014 6.167 10.014C4.041 10.014 2.321 8.287 2.321 6.167Z"/></svg>
-          <svg class="hide-narrow" width="13.31" height="13.58" viewBox="2.00 1.00 13.31 13.58" aria-hidden="true"><path d="M5.094 14.575L12.210 14.575C13.941 14.575 15.308 13.350 15.308 11.595C15.308 9.840 13.941 8.615 12.210 8.615L5.094 8.615C3.362 8.615 2.000 9.840 2.000 11.595C2.000 13.350 3.362 14.575 5.094 14.575ZM10.288 13.211C9.361 13.211 8.617 12.546 8.617 11.587C8.617 10.634 9.361 9.969 10.288 9.969L12.335 9.969C13.268 9.969 14.007 10.634 14.007 11.593C14.007 12.546 13.268 13.211 12.335 13.211ZM5.389 7.568L11.915 7.568C13.846 7.568 15.308 6.246 15.308 4.284C15.308 2.322 13.846 1.000 11.915 1.000L5.389 1.000C3.464 1.000 2.000 2.322 2.000 4.284C2.000 6.246 3.464 7.568 5.389 7.568ZM5.389 6.189C4.282 6.189 3.422 5.426 3.422 4.284C3.422 3.142 4.282 2.379 5.389 2.379L11.915 2.379C13.026 2.379 13.882 3.143 13.882 4.284C13.882 5.425 13.026 6.189 11.915 6.189ZM5.389 5.758L7.323 5.758C8.165 5.758 8.845 5.153 8.845 4.284C8.845 3.410 8.165 2.805 7.323 2.805L5.389 2.805C4.547 2.805 3.867 3.410 3.867 4.279C3.867 5.153 4.547 5.758 5.389 5.758Z"/></svg>
-          <span class="clock">Wed Oct 21&nbsp; 9:41 AM</span>
-        </div>
-
-        <div class="hero-copy">
-          <h1>See your Claude limits <span class="accent">before you hit them.</span></h1>
-          <p class="lede">A free, open-source menu bar app that tracks your 5-hour and weekly limits, shows when they reset, and notifies you before you run out.</p>
-          <div class="ctas">
-            <a class="btn" href="https://github.com/Blimp-Labs/claude-usage-bar/releases/latest/download/ClaudeUsageBar.dmg">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0 4.5-4.5M12 15l-4.5-4.5M5 19h14"/></svg>
-              Download for Mac
-            </a>
-            <a class="btn outline" href="https://github.com/Blimp-Labs/claude-usage-bar">View on GitHub</a>
-          </div>
-          <p class="fine">Free &amp; open source &middot; macOS 14 or later</p>
+          <svg width="25.5" height="12" viewBox="0 0 25.5 12" aria-hidden="true"><rect x=".5" y=".5" width="22" height="11" rx="2.25" fill="none" stroke="#fff" stroke-opacity=".5"/><rect x="2" y="2" width="14.25" height="8" rx="1.25"/><path d="M24 4h.25c.69 0 1.25.56 1.25 1.25v1.5c0 .69-.56 1.25-1.25 1.25H24z" fill-opacity=".6"/></svg>
+          <svg width="17.30" height="12.48" viewBox="1.00 1.00 17.30 12.48" aria-hidden="true"><path d="M2.195 6.337C2.361 6.512 2.626 6.509 2.795 6.325C4.612 4.407 6.986 3.396 9.650 3.396C12.332 3.396 14.720 4.408 16.528 6.335C16.686 6.501 16.942 6.492 17.112 6.320L18.150 5.286C18.302 5.128 18.302 4.918 18.173 4.765C16.391 2.561 13.070 1.000 9.650 1.000C6.238 1.000 2.915 2.560 1.129 4.765C1.000 4.918 1.007 5.128 1.157 5.286ZM5.273 9.377C5.455 9.561 5.707 9.540 5.888 9.347C6.791 8.370 8.214 7.702 9.650 7.709C11.103 7.702 12.529 8.392 13.448 9.374C13.614 9.557 13.847 9.546 14.035 9.372L15.199 8.250C15.344 8.106 15.359 7.903 15.231 7.745C14.065 6.353 11.952 5.361 9.650 5.361C7.350 5.361 5.238 6.354 4.076 7.745C3.943 7.903 3.952 8.095 4.109 8.250ZM9.653 13.482C9.844 13.482 10.004 13.395 10.308 13.104L12.117 11.362C12.257 11.226 12.286 11.006 12.156 10.846C11.626 10.171 10.683 9.649 9.653 9.649C8.597 9.649 7.637 10.196 7.107 10.912C7.013 11.052 7.061 11.232 7.198 11.362L8.999 13.104C9.304 13.389 9.468 13.482 9.653 13.482Z"/></svg>
+          <svg width="12.53" height="12.65" viewBox="1.00 1.00 12.53 12.65" aria-hidden="true"><path d="M1.000 6.167C1.000 9.019 3.316 11.329 6.167 11.329C7.224 11.329 8.197 11.007 9.008 10.453L11.924 13.377C12.109 13.558 12.351 13.645 12.601 13.645C13.140 13.645 13.529 13.235 13.529 12.705C13.529 12.453 13.435 12.221 13.267 12.041L10.367 9.135C10.973 8.301 11.329 7.278 11.329 6.167C11.329 3.316 9.018 1.000 6.167 1.000C3.316 1.000 1.000 3.316 1.000 6.167ZM2.321 6.167C2.321 4.043 4.041 2.321 6.167 2.321C8.287 2.321 10.014 4.043 10.014 6.167C10.014 8.287 8.287 10.014 6.167 10.014C4.041 10.014 2.321 8.287 2.321 6.167Z"/></svg>
+          <svg width="13.31" height="13.58" viewBox="2.00 1.00 13.31 13.58" aria-hidden="true"><path d="M5.094 14.575L12.210 14.575C13.941 14.575 15.308 13.350 15.308 11.595C15.308 9.840 13.941 8.615 12.210 8.615L5.094 8.615C3.362 8.615 2.000 9.840 2.000 11.595C2.000 13.350 3.362 14.575 5.094 14.575ZM10.288 13.211C9.361 13.211 8.617 12.546 8.617 11.587C8.617 10.634 9.361 9.969 10.288 9.969L12.335 9.969C13.268 9.969 14.007 10.634 14.007 11.593C14.007 12.546 13.268 13.211 12.335 13.211ZM5.389 7.568L11.915 7.568C13.846 7.568 15.308 6.246 15.308 4.284C15.308 2.322 13.846 1.000 11.915 1.000L5.389 1.000C3.464 1.000 2.000 2.322 2.000 4.284C2.000 6.246 3.464 7.568 5.389 7.568ZM5.389 6.189C4.282 6.189 3.422 5.426 3.422 4.284C3.422 3.142 4.282 2.379 5.389 2.379L11.915 2.379C13.026 2.379 13.882 3.143 13.882 4.284C13.882 5.425 13.026 6.189 11.915 6.189ZM5.389 5.758L7.323 5.758C8.165 5.758 8.845 5.153 8.845 4.284C8.845 3.410 8.165 2.805 7.323 2.805L5.389 2.805C4.547 2.805 3.867 3.410 3.867 4.279C3.867 5.153 4.547 5.758 5.389 5.758Z"/></svg>
+          <span class="clock">Wed Oct 21&nbsp; 9:41&#8239;AM</span>
         </div>
 
         <div class="popover first" id="popover" role="group" aria-label="Claude Usage Bar popover with example data">
@@ -532,7 +543,7 @@ footer a:hover { color: var(--ink); }
       <h2>Know where you stand before you run out.</h2>
       <p class="fine">Free for macOS 14 and later.</p>
       <div class="ctas">
-        <a class="btn btn-ink" href="https://github.com/Blimp-Labs/claude-usage-bar/releases/latest/download/ClaudeUsageBar.dmg">Download for Mac</a>
+        <a class="btn btn-ink" href="https://github.com/Blimp-Labs/claude-usage-bar/releases/latest/download/ClaudeUsageBar.dmg"><svg viewBox="0 1 16.56 19.31" fill="currentColor" aria-hidden="true"><path d="M12.539 5.648C10.957 5.531 9.590 6.547 8.857 6.547C8.096 6.547 6.924 5.688 5.664 5.707C4.033 5.717 2.539 6.654 1.680 8.109C0.000 11.059 1.270 15.434 2.910 17.807C3.711 18.998 4.687 20.307 5.957 20.268C7.168 20.209 7.627 19.467 9.111 19.467C10.596 19.467 10.986 20.268 12.275 20.229C13.604 20.209 14.414 19.047 15.244 17.875C16.162 16.498 16.553 15.190 16.562 15.121C16.523 15.121 14.004 14.145 13.984 11.234C13.965 8.803 15.977 7.611 16.055 7.563C14.912 5.893 13.145 5.707 12.539 5.648ZM11.553 4.076C12.227 3.256 12.676 2.133 12.559 1.000C11.592 1.029 10.420 1.645 9.717 2.455C9.111 3.178 8.564 4.340 8.711 5.434C9.795 5.512 10.889 4.887 11.553 4.076Z"/></svg>Download for Mac</a>
         <a class="btn" href="https://github.com/Blimp-Labs/claude-usage-bar">View on GitHub</a>
       </div>
     </section>
@@ -849,8 +860,10 @@ footer a:hover { color: var(--ink); }
   const popover = $("popover"), statusItem = $("status-item"), updated = $("updated");
   const level = (v) => v >= 80 ? "red" : v >= 60 ? "yellow" : "green";
   document.querySelectorAll(".popover .p-bar i").forEach((bar, i) => bar.style.setProperty("--i", i));
-  // Reopening restarts the spring; closing shrinks back toward the menu bar first.
+  // Reopening restarts the spring; closing shrinks back toward the menu bar first. On narrow screens, where it sits below the copy, it stays open.
+  const stacked = matchMedia("(max-width: 1000px)");
   const setOpen = (open) => {
+    if (!open && stacked.matches) return;
     statusItem.setAttribute("aria-expanded", String(open));
     popover.classList.remove("first");
     if (open) { popover.classList.remove("closing"); popover.hidden = false; return; }
@@ -859,6 +872,7 @@ footer a:hover { color: var(--ink); }
     popover.addEventListener("animationend", () => { if (popover.classList.contains("closing")) { popover.hidden = true; popover.classList.remove("closing"); } }, { once: true });
   };
   statusItem.addEventListener("click", () => setOpen(popover.hidden || popover.classList.contains("closing")));
+  stacked.addEventListener("change", () => { if (stacked.matches) setOpen(true); });
   $("quit").addEventListener("click", () => setOpen(false));
   $("go-settings").addEventListener("click", () => $("start").scrollIntoView({ behavior: still ? "auto" : "smooth" }));
   $("refresh").addEventListener("click", () => {
