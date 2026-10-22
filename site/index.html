@@ -217,12 +217,12 @@ code { font: 0.9em var(--mono); }
 }
 .num { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--inset); font-size: 14px; font-weight: 600; color: var(--muted); }
 .snip { margin-top: 14px; min-height: 160px; border-radius: 14px; border: 1px solid var(--line); overflow: hidden; background: var(--inset); }
-.install { display: flex; align-items: center; justify-content: center; gap: 18px; }
-.install img { width: 64px; height: 64px; border-radius: 15px; }
+.install { margin-top: 14px; min-height: 160px; display: flex; align-items: center; justify-content: center; gap: 18px; }
 .install .arrow { width: 54px; height: 16px; color: var(--muted); }
-/* The label hangs below the icon without counting toward its height, so the folder lines up with the app icon like in a Finder window. */
-.folder { display: grid; grid-template-rows: 80px 0; justify-items: center; font-size: 12px; color: var(--ink); }
-.folder img { width: 80px; height: 80px; border-radius: 0; }
+/* Labels hang below the icons without counting toward their height, so the app and the folder line up like in a Finder window. */
+.file { display: grid; grid-template-rows: 80px 0; justify-items: center; text-align: center; font-size: 12px; line-height: 1.3; color: var(--ink); }
+.file img { width: 80px; height: 80px; }
+.file .app { width: 64px; height: 64px; border-radius: 15px; align-self: center; }
 .mini-browser { display: grid; grid-template-rows: auto 1fr; background: var(--card); }
 .mb-bar { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--inset); }
 .mb-bar i { width: 9px; height: 9px; border-radius: 50%; background: var(--rail); }
@@ -425,10 +425,10 @@ footer a:hover { color: var(--ink); }
         <article class="step">
           <h3><span class="num">1</span>Download it</h3>
           <p>Drag the app into Applications. It's free and runs on macOS 14 or later.</p>
-          <div class="snip install rise" aria-hidden="true">
-            <img class="pop" src="icon.png" alt="">
+          <div class="install rise" aria-hidden="true">
+            <span class="file pop"><img class="app" src="icon.png" alt="">Claude<br>Usage Bar</span>
             <svg class="arrow" viewBox="0 0 54 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8h46" stroke-dasharray="4 5"/><path d="m44 3 6 5-6 5"/></svg>
-            <span class="folder pop"><img src="applications.png" alt="">Applications</span>
+            <span class="file pop"><img src="applications.png" alt="">Applications</span>
           </div>
         </article>
         <article class="step">
