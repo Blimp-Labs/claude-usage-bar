@@ -68,8 +68,6 @@ Your data stays on your Mac, in `~/.config/claude-usage-bar/`:
 | `credentials.json` | Your sign-in tokens, readable only by you |
 | `history.json` | Usage history for the chart, kept for 30 days, readable only by you |
 
-If Claude Code is installed, the app also reads your account email from `~/.claude.json` to show which account is signed in.
-
 The app only connects to:
 
 - `claude.ai` and `platform.claude.com`, to sign you in

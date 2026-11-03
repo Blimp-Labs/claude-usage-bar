@@ -32,6 +32,9 @@ class UsageService: ObservableObject {
     }
 
     private var refreshTask: Task<RefreshResult, Never>?
+    /// Bumped whenever the signed-in account may change, so a profile reply for
+    /// an earlier account can't overwrite the current one.
+    private var accountGeneration = 0
 
     static let defaultPollingMinutes = 30
     static let pollingOptions = [5, 15, 30, 60]
@@ -148,11 +151,15 @@ class UsageService: ObservableObject {
 
     func startPolling() {
         guard isAuthenticated else { return }
-        Task {
-            await fetchUsage()
-            if accountEmail == nil { await fetchProfile() }
-        }
+        Task { await poll() }
         scheduleTimer()
+    }
+
+    /// Retries the profile too, so a lookup that failed at launch doesn't leave
+    /// Settings without an email until the next sign-in.
+    private func poll() async {
+        await fetchUsage()
+        if accountEmail == nil { await fetchProfile() }
     }
 
     private func scheduleTimer() {
@@ -160,7 +167,7 @@ class UsageService: ObservableObject {
         let t = Timer(timeInterval: currentInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, self.isAuthenticated else { return }
-                Task { await self.fetchUsage() }
+                Task { await self.poll() }
             }
         }
         RunLoop.main.add(t, forMode: .common)
@@ -334,6 +341,8 @@ class UsageService: ObservableObject {
                 return false
             }
             isAuthenticated = true
+            accountEmail = nil
+            accountGeneration += 1
             lastError = nil
             endOAuthFlow()
 
@@ -367,6 +376,7 @@ class UsageService: ObservableObject {
         usage = nil
         lastUpdated = nil
         accountEmail = nil
+        accountGeneration += 1
         timer?.invalidate()
         timer = nil
         refreshTask?.cancel()
@@ -449,6 +459,7 @@ class UsageService: ObservableObject {
     // MARK: - Profile
 
     func fetchProfile() async {
+        let generation = accountGeneration
         guard let result = try? await sendAuthorizedRequest(
             to: profileEndpoint,
             expireSessionOnAuthFailure: false
@@ -459,7 +470,8 @@ class UsageService: ObservableObject {
         guard http.statusCode == 200,
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let account = json["account"] as? [String: Any],
-              let email = account["email"] as? String, !email.isEmpty else {
+              let email = account["email"] as? String, !email.isEmpty,
+              generation == accountGeneration else {
             return
         }
         accountEmail = email
@@ -699,6 +711,7 @@ class UsageService: ObservableObject {
         usage = nil
         lastUpdated = nil
         accountEmail = nil
+        accountGeneration += 1
         timer?.invalidate()
         timer = nil
         refreshTask?.cancel()

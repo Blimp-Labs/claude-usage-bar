@@ -6,6 +6,7 @@ import XCTest
 final class UsageServiceTests: XCTestCase {
     override func tearDown() {
         MockURLProtocol.handler = nil
+        MockURLProtocol.hold = nil
         super.tearDown()
     }
 
@@ -272,13 +273,16 @@ final class UsageServiceTests: XCTestCase {
         XCTAssertEqual(saved.refreshToken, "refresh-new")
     }
 
-    func testSigningInAsAnotherAccountShowsThatAccountsEmail() async throws {
+    func testSigningInAsAnotherAccountIgnoresTheOldAccountsLateProfile() async throws {
+        let store = try makeStore()
+        try store.save(
+            StoredCredentials(accessToken: "access-a", refreshToken: nil, expiresAt: nil, scopes: UsageService.defaultOAuthScopes)
+        )
         MockURLProtocol.handler = { request in
             switch (request.httpMethod, request.url?.path) {
             case ("POST", "/v1/oauth/token"):
-                let code = Self.jsonBody(for: request)?["code"] ?? ""
                 return try Self.httpResponse(url: request.url!, statusCode: 200, body: """
-                {"access_token": "access-\(code)", "expires_in": 3600, "scope": "user:profile user:inference"}
+                {"access_token": "access-b", "expires_in": 3600, "scope": "user:profile user:inference"}
                 """)
             case ("GET", "/api/oauth/profile"):
                 let bearer = request.value(forHTTPHeaderField: "Authorization") ?? ""
@@ -293,18 +297,32 @@ final class UsageServiceTests: XCTestCase {
                 return try Self.httpResponse(url: request.url!, statusCode: 500)
             }
         }
+        let accountASent = expectation(description: "account A's profile request sent")
+        let releaseAccountA = DispatchSemaphore(value: 0)
+        MockURLProtocol.hold = (
+            matches: { request in
+                guard request.value(forHTTPHeaderField: "Authorization") == "Bearer access-a" else { return false }
+                accountASent.fulfill()
+                return true
+            },
+            until: releaseAccountA
+        )
         var openedURL: URL?
-        let service = makeOAuthService(store: try makeStore(), listener: false) { openedURL = $0 }
+        let service = makeOAuthService(store: store, listener: false) { openedURL = $0 }
         defer { service.signOut() }
 
-        for account in ["a", "b"] {
-            service.signOut()
-            await service.startOAuthFlow()
-            let state = try XCTUnwrap(queryItems(of: openedURL)["state"])
-            await service.submitOAuthCode("\(account)#\(state)")
+        let accountAProfile = Task { await service.fetchProfile() }
+        await fulfillment(of: [accountASent], timeout: 5)
+        service.signOut()
+        await service.startOAuthFlow()
+        let state = try XCTUnwrap(queryItems(of: openedURL)["state"])
+        await service.submitOAuthCode("code-b#\(state)")
+        XCTAssertEqual(service.accountEmail, "b@example.com")
 
-            XCTAssertEqual(service.accountEmail, "\(account)@example.com")
-        }
+        releaseAccountA.signal()
+        await accountAProfile.value
+
+        XCTAssertEqual(service.accountEmail, "b@example.com")
     }
 
     // MARK: - Transient vs permanent refresh failure
@@ -1011,6 +1029,8 @@ final class UsageServiceTests: XCTestCase {
 
 private final class MockURLProtocol: URLProtocol {
     static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+    /// Delays the response to matching requests until the semaphore is signalled.
+    static var hold: (matches: (URLRequest) -> Bool, until: DispatchSemaphore)?
 
     override class func canInit(with request: URLRequest) -> Bool {
         true
@@ -1026,13 +1046,25 @@ private final class MockURLProtocol: URLProtocol {
             return
         }
 
-        do {
-            let (response, data) = try handler(request)
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: data)
-            client?.urlProtocolDidFinishLoading(self)
-        } catch {
-            client?.urlProtocol(self, didFailWithError: error)
+        let respond = { [self] in
+            do {
+                let (response, data) = try handler(request)
+                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                client?.urlProtocol(self, didLoad: data)
+                client?.urlProtocolDidFinishLoading(self)
+            } catch {
+                client?.urlProtocol(self, didFailWithError: error)
+            }
+        }
+
+        if let hold = Self.hold, hold.matches(request) {
+            // Off the loading thread, so other requests still get answered.
+            DispatchQueue.global().async {
+                hold.until.wait()
+                respond()
+            }
+        } else {
+            respond()
         }
     }
 
