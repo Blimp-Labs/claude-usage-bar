@@ -93,7 +93,7 @@ struct PopoverView: View {
         }
 
         Divider()
-        UsageChartView(historyService: historyService)
+        UsageChartView(historyService: historyService, showsFiveHour: service.hasFiveHourWindow)
 
         if let error = service.lastError {
             Divider()

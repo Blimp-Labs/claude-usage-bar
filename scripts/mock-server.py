@@ -246,7 +246,7 @@ SCENARIOS = {
             "utilization": 25.5,
         },
     },
-    # Captured from an Ultra plan on 2026-11-03.
+    # Shaped like an Ultra plan's response on 2026-11-03.
     "ultra": {
         "five_hour": None,
         "seven_day": {"utilization": 71.0, "resets_at": iso_future(days=3)},

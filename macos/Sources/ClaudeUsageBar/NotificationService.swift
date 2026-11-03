@@ -102,8 +102,8 @@ class NotificationService: ObservableObject {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
-    func checkAndNotify(pct5h: Double?, pct7d: Double, pctExtra: Double) {
-        let current5h = pct5h.map { $0 * 100 }
+    func checkAndNotify(pct5h: Double, pct7d: Double, pctExtra: Double) {
+        let current5h = pct5h * 100
         let current7d = pct7d * 100
         let currentExtra = pctExtra * 100
 
@@ -118,13 +118,13 @@ class NotificationService: ObservableObject {
         }
 
         let alerts = crossedThresholds(
-            threshold5h: current5h == nil ? 0 : threshold5h,
+            threshold5h: threshold5h,
             threshold7d: threshold7d,
             thresholdExtra: thresholdExtra,
             previous5h: prev5h,
             previous7d: prev7d,
             previousExtra: prevExtra,
-            current5h: current5h ?? 0,
+            current5h: current5h,
             current7d: current7d,
             currentExtra: currentExtra
         )

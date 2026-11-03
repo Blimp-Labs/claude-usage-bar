@@ -3,11 +3,10 @@ import Foundation
 struct UsageDataPoint: Codable, Identifiable {
     var id: UUID
     let timestamp: Date
-    /// Nil when the account had no 5-hour window (Ultra plans).
-    let pct5h: Double?
+    let pct5h: Double
     let pct7d: Double
 
-    init(timestamp: Date = Date(), pct5h: Double?, pct7d: Double) {
+    init(timestamp: Date = Date(), pct5h: Double, pct7d: Double) {
         self.id = UUID()
         self.timestamp = timestamp
         self.pct5h = pct5h

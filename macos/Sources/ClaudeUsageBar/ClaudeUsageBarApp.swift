@@ -16,7 +16,7 @@ struct ClaudeUsageBarApp: App {
             )
         } label: {
             Image(nsImage: service.isAuthenticated
-                ? renderIcon(pct5h: service.pct5h, pct7d: service.pct7d)
+                ? renderIcon(pct5h: service.hasFiveHourWindow ? service.pct5h : nil, pct7d: service.pct7d)
                 : renderUnauthenticatedIcon()
             )
                 .task {

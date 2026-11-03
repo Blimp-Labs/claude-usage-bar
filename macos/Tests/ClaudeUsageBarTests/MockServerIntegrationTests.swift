@@ -69,44 +69,29 @@ final class MockServerIntegrationTests: XCTestCase {
         await service.fetchUsage()
 
         XCTAssertNil(service.lastError)
-        XCTAssertEqual(try XCTUnwrap(service.pct5h), 0.35, accuracy: 0.0001)
+        XCTAssertEqual(service.pct5h, 0.35, accuracy: 0.0001)
         XCTAssertEqual(service.pct7d, 0.55, accuracy: 0.0001)
     }
 
     // MARK: - Plans without a 5-hour window
 
-    func testUltraScenarioDropsTheFiveHourWindowEverywhere() async throws {
-        let service = try makeService()
-        let history = UsageHistoryService(
-            historyFileURL: FileManager.default.temporaryDirectory
-                .appendingPathComponent(UUID().uuidString)
-                .appendingPathExtension("json")
-        )
-        service.historyService = history
-        XCTAssertTrue(service.hasFiveHourWindow, "Assumed until a response says otherwise")
+    func testFiveHourWindowFollowsThePlanAndIsRemembered() async throws {
+        let defaults = makeDefaults()
+        let service = try makeService(defaults: defaults)
+        XCTAssertTrue(service.hasFiveHourWindow)
 
         try await setScenario("ultra")
         await service.fetchUsage()
 
         XCTAssertNil(service.lastError)
-        XCTAssertNil(service.usage?.fiveHour)
-        XCTAssertNil(service.pct5h)
         XCTAssertFalse(service.hasFiveHourWindow)
         XCTAssertEqual(service.pct7d, 0.71, accuracy: 0.0001)
-        XCTAssertEqual(service.usage?.perModelWeekly.map(\.displayName), ["Fable"])
-        XCTAssertNil(try XCTUnwrap(history.history.dataPoints.last).pct5h)
-    }
-
-    func testFiveHourWindowReturnsWhenThePlanRegainsIt() async throws {
-        let service = try makeService()
-
-        try await setScenario("ultra")
-        await service.fetchUsage()
-        XCTAssertFalse(service.hasFiveHourWindow)
+        XCTAssertFalse(try makeService(defaults: defaults).hasFiveHourWindow, "Should be remembered across launches")
 
         try await setScenario("normal")
         await service.fetchUsage()
-        XCTAssertEqual(try XCTUnwrap(service.pct5h), 0.25, accuracy: 0.0001)
+
+        XCTAssertTrue(service.hasFiveHourWindow)
     }
 
     // MARK: - Polling across scenario changes
@@ -295,6 +280,23 @@ final class MockServerIntegrationTests: XCTestCase {
             )
         }
         return (service, store)
+    }
+
+    private func makeService(defaults: UserDefaults) throws -> UsageService {
+        let server = try XCTUnwrap(self.server)
+        return UsageService(
+            session: URLSession(configuration: .ephemeral),
+            usageEndpoint: server.usageURL,
+            tokenEndpoint: server.tokenURL,
+            credentialsStore: try makeStore(),
+            defaults: defaults
+        )
+    }
+
+    private func makeDefaults() -> UserDefaults {
+        let suite = "ClaudeUsageBarTests-\(UUID().uuidString)"
+        addTeardownBlock { UserDefaults.standard.removePersistentDomain(forName: suite) }
+        return UserDefaults(suiteName: suite)!
     }
 
     private func makeStore() throws -> StoredCredentialsStore {

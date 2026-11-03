@@ -530,15 +530,6 @@ final class UsageModelTests: XCTestCase {
         XCTAssertEqual(response.perModelWeekly.map(\.displayName), ["Fable"])
     }
 
-    func testReconcileDoesNotCarryAFiveHourWindowTheServerDropped() {
-        let previous = usageResponse(
-            fiveHour: UsageBucket(utilization: 40.0, resetsAt: "2026-11-03T20:00:00Z")
-        )
-        let current = usageResponse(fiveHour: nil)
-
-        XCTAssertNil(current.reconciled(with: previous).fiveHour)
-    }
-
     private func decode(_ json: String) throws -> UsageResponse {
         try JSONDecoder().decode(UsageResponse.self, from: Data(json.utf8))
     }

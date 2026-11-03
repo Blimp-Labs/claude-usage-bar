@@ -62,7 +62,7 @@ class UsageHistoryService: ObservableObject {
 
     // MARK: - Record
 
-    func recordDataPoint(pct5h: Double?, pct7d: Double) {
+    func recordDataPoint(pct5h: Double, pct7d: Double) {
         let point = UsageDataPoint(pct5h: pct5h, pct7d: pct7d)
         history.dataPoints.append(point)
         isDirty = true
@@ -139,10 +139,7 @@ class UsageHistoryService: ObservableObject {
 
         return buckets.compactMap { bucket -> UsageDataPoint? in
             guard !bucket.isEmpty else { return nil }
-            let fiveHour = bucket.compactMap(\.pct5h)
-            let avgPct5h = fiveHour.isEmpty
-                ? nil
-                : fiveHour.reduce(0, +) / Double(fiveHour.count)
+            let avgPct5h = bucket.map(\.pct5h).reduce(0, +) / Double(bucket.count)
             let avgPct7d = bucket.map(\.pct7d).reduce(0, +) / Double(bucket.count)
             let avgTimestamp = bucket.map { $0.timestamp.timeIntervalSince1970 }.reduce(0, +) / Double(bucket.count)
             return UsageDataPoint(

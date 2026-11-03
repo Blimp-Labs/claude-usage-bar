@@ -19,7 +19,7 @@ Now it's just a glimpse away — always sitting at the top of your screen.
 
 A small macOS menu bar app that shows how much of your Claude plan's usage limits you've used.
 
-- A menu bar icon with two mini bars for your 5-hour and 7-day limits
+- A menu bar icon with mini bars for your 5-hour and 7-day limits
 - A popover with each limit's usage and reset time, a per-model breakdown when your plan has one, and extra usage in USD
 - A usage history chart from the last hour to the last 30 days; hover it for exact values
 - Notifications when a limit passes a percentage you choose

@@ -3,6 +3,7 @@ import Charts
 
 struct UsageChartView: View {
     @ObservedObject var historyService: UsageHistoryService
+    let showsFiveHour: Bool
     @State private var selectedRange: TimeRange = .day1
     @State private var hoverDate: Date?
 
@@ -34,25 +35,25 @@ struct UsageChartView: View {
         let interpolated = hoverDate.flatMap {
             UsageChartInterpolation.interpolateValues(at: $0, in: points)
         }
-        let fiveHour = UsageChartInterpolation.fiveHourRuns(in: points)
-        let windows = fiveHour.isEmpty ? ["7d"] : ["5h", "7d"]
+
+        let windows = showsFiveHour ? ["5h", "7d"] : ["7d"]
 
         Chart {
-            ForEach(fiveHour) { sample in
-                LineMark(
-                    x: .value("Time", sample.timestamp),
-                    y: .value("Usage", sample.pct * 100),
-                    series: .value("Series", "5h-\(sample.run)")
-                )
-                .foregroundStyle(by: .value("Window", "5h"))
-                .interpolationMethod(.catmullRom)
+            if showsFiveHour {
+                ForEach(points) { point in
+                    LineMark(
+                        x: .value("Time", point.timestamp),
+                        y: .value("Usage", point.pct5h * 100)
+                    )
+                    .foregroundStyle(by: .value("Window", "5h"))
+                    .interpolationMethod(.catmullRom)
+                }
             }
 
             ForEach(points) { point in
                 LineMark(
                     x: .value("Time", point.timestamp),
-                    y: .value("Usage", point.pct7d * 100),
-                    series: .value("Series", "7d")
+                    y: .value("Usage", point.pct7d * 100)
                 )
                 .foregroundStyle(by: .value("Window", "7d"))
                 .interpolationMethod(.catmullRom)
@@ -63,10 +64,10 @@ struct UsageChartView: View {
                     .foregroundStyle(.secondary.opacity(0.4))
                     .lineStyle(StrokeStyle(lineWidth: 1))
 
-                if let pct5h = iv.pct5h {
+                if showsFiveHour {
                     PointMark(
                         x: .value("Time", iv.date),
-                        y: .value("Usage", pct5h * 100)
+                        y: .value("Usage", iv.pct5h * 100)
                     )
                     .foregroundStyle(.blue)
                     .symbolSize(24)
@@ -100,7 +101,7 @@ struct UsageChartView: View {
                 AxisGridLine()
             }
         }
-        // Built from the data so there's no 5h legend entry without a 5h line.
+        // A fixed "5h"/"7d" scale would keep a 5h legend entry with no line.
         .chartForegroundStyleScale(
             domain: windows,
             range: windows.map { $0 == "5h" ? Color.blue : Color.orange }
@@ -123,13 +124,13 @@ struct UsageChartView: View {
     }
 
     @ViewBuilder
-    private func tooltipView(date: Date, pct5h: Double?, pct7d: Double) -> some View {
+    private func tooltipView(date: Date, pct5h: Double, pct7d: Double) -> some View {
         VStack(spacing: 2) {
             Text(date, format: tooltipDateFormat)
                 .font(.system(size: 9))
                 .foregroundStyle(.secondary)
             HStack(spacing: 6) {
-                if let pct5h {
+                if showsFiveHour {
                     Label("\(Int(round(pct5h * 100)))%", systemImage: "circle.fill")
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(.blue)
@@ -173,16 +174,8 @@ struct UsageChartView: View {
 
 struct UsageChartInterpolatedValues {
     let date: Date
-    let pct5h: Double?
+    let pct5h: Double
     let pct7d: Double
-}
-
-/// One point of the 5-hour line; `run` numbers its unbroken stretch.
-struct FiveHourChartSample: Identifiable {
-    let id: UUID
-    let timestamp: Date
-    let pct: Double
-    let run: Int
 }
 
 enum UsageChartInterpolation {
@@ -197,28 +190,13 @@ enum UsageChartInterpolation {
         )
     }
 
-    /// Splits the 5-hour series at missing values so a gap isn't bridged by a line.
-    static func fiveHourRuns(in points: [UsageDataPoint]) -> [FiveHourChartSample] {
-        var run = 0
-        var samples: [FiveHourChartSample] = []
-        for point in points {
-            if let pct = point.pct5h {
-                samples.append(FiveHourChartSample(id: point.id, timestamp: point.timestamp, pct: pct, run: run))
-            } else if samples.last?.run == run {
-                run += 1
-            }
-        }
-        return samples
-    }
-
     static func interpolateValues(at date: Date, in points: [UsageDataPoint]) -> UsageChartInterpolatedValues? {
         guard points.count >= 2 else { return nil }
 
         let sorted = points.sorted { $0.timestamp < $1.timestamp }
 
         if date < sorted.first!.timestamp || date > sorted.last!.timestamp {
-            let hasFiveHour = sorted.contains { $0.pct5h != nil }
-            return UsageChartInterpolatedValues(date: date, pct5h: hasFiveHour ? 0 : nil, pct7d: 0)
+            return UsageChartInterpolatedValues(date: date, pct5h: 0, pct7d: 0)
         }
 
         for i in 0..<(sorted.count - 1) {
@@ -229,13 +207,10 @@ enum UsageChartInterpolation {
                 let i0 = max(0, i - 1)
                 let i3 = min(sorted.count - 1, i + 2)
 
-                // Missing outer control points fall back to the segment's ends.
-                let pct5h: Double? = {
-                    guard let p1 = sorted[i].pct5h, let p2 = sorted[i + 1].pct5h else { return nil }
-                    let p0 = sorted[i0].pct5h ?? p1
-                    let p3 = sorted[i3].pct5h ?? p2
-                    return clampToUnitInterval(catmullRom(p0, p1, p2, p3, t: t))
-                }()
+                let pct5h = catmullRom(
+                    sorted[i0].pct5h, sorted[i].pct5h,
+                    sorted[i + 1].pct5h, sorted[i3].pct5h, t: t
+                )
                 let pct7d = catmullRom(
                     sorted[i0].pct7d, sorted[i].pct7d,
                     sorted[i + 1].pct7d, sorted[i3].pct7d, t: t
@@ -243,7 +218,7 @@ enum UsageChartInterpolation {
 
                 return UsageChartInterpolatedValues(
                     date: date,
-                    pct5h: pct5h,
+                    pct5h: clampToUnitInterval(pct5h),
                     pct7d: clampToUnitInterval(pct7d)
                 )
             }
