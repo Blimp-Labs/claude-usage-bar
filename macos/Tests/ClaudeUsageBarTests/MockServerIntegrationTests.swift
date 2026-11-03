@@ -122,6 +122,16 @@ final class MockServerIntegrationTests: XCTestCase {
         )
     }
 
+    // MARK: - Profile
+
+    func testProfileComesFromTheMockProfileEndpoint() async throws {
+        let service = try makeService()
+
+        await service.fetchProfile()
+
+        XCTAssertEqual(service.accountEmail, "test@example.com")
+    }
+
     // MARK: - Credentials are never destroyed by a local mock
 
     /// The token endpoint is not overridable, so a mock 401 used to drive
@@ -244,18 +254,18 @@ final class MockServerIntegrationTests: XCTestCase {
         if usingDefaultEndpoint {
             service = UsageService(
                 session: URLSession(configuration: .ephemeral),
+                profileEndpoint: server.profileURL,
                 tokenEndpoint: server.tokenURL,
-                credentialsStore: store,
-                localProfileLoader: { nil }
+                credentialsStore: store
             )
         } else {
             service = UsageService(
                 session: URLSession(configuration: .ephemeral),
                 usageEndpoint: server.usageURL,
+                profileEndpoint: server.profileURL,
                 // Never let a test reach the real token endpoint.
                 tokenEndpoint: server.tokenURL,
-                credentialsStore: store,
-                localProfileLoader: { nil }
+                credentialsStore: store
             )
         }
         return (service, store)
@@ -289,6 +299,7 @@ private final class MockServer {
 
     var baseURL: URL { URL(string: "http://127.0.0.1:\(port)")! }
     var usageURL: URL { baseURL.appendingPathComponent("api/oauth/usage") }
+    var profileURL: URL { baseURL.appendingPathComponent("api/oauth/profile") }
     var tokenURL: URL { baseURL.appendingPathComponent("v1/oauth/token") }
 
     private init(port: Int, process: Process) {

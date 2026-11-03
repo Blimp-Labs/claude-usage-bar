@@ -256,8 +256,8 @@ class MockHandler(BaseHTTPRequestHandler):
             self.handle_usage()
         elif self.path.startswith("/scenario/"):
             self.handle_set_scenario()
-        elif self.path == "/api/oauth/userinfo":
-            self.handle_userinfo()
+        elif self.path == "/api/oauth/profile":
+            self.handle_profile()
         else:
             self.send_error(404)
 
@@ -283,11 +283,22 @@ class MockHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps({"scenario": name}).encode())
 
-    def handle_userinfo(self):
+    def handle_profile(self):
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
-        self.wfile.write(json.dumps({"email": "test@example.com", "name": "Test User"}).encode())
+        self.wfile.write(
+            json.dumps(
+                {
+                    "account": {
+                        "uuid": "00000000-0000-4000-8000-000000000001",
+                        "email": "test@example.com",
+                        "display_name": "Test User",
+                    },
+                    "organization": {"uuid": "00000000-0000-4000-8000-000000000002"},
+                }
+            ).encode()
+        )
 
     def handle_usage(self):
         scenario = self.server.scenario

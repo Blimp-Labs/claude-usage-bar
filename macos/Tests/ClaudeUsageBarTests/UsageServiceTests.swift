@@ -85,7 +85,7 @@ final class UsageServiceTests: XCTestCase {
         let service = UsageService(
             session: session,
             usageEndpoint: usageURL,
-            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             tokenEndpoint: tokenURL,
             credentialsStore: store
         )
@@ -150,7 +150,7 @@ final class UsageServiceTests: XCTestCase {
         let service = UsageService(
             session: makeSession(),
             usageEndpoint: usageURL,
-            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             tokenEndpoint: tokenURL,
             credentialsStore: store
         )
@@ -200,7 +200,7 @@ final class UsageServiceTests: XCTestCase {
         let service = UsageService(
             session: makeSession(),
             usageEndpoint: usageURL,
-            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             tokenEndpoint: tokenURL,
             credentialsStore: store
         )
@@ -212,7 +212,7 @@ final class UsageServiceTests: XCTestCase {
         XCTAssertNil(store.load(defaultScopes: UsageService.defaultOAuthScopes))
     }
 
-    func testFetchProfileDoesNotSignOutWhenUserinfoStillReturns401AfterRefresh() async throws {
+    func testFetchProfileDoesNotSignOutWhenProfileStillReturns401AfterRefresh() async throws {
         let store = try makeStore()
         try store.save(
             StoredCredentials(
@@ -223,15 +223,15 @@ final class UsageServiceTests: XCTestCase {
             )
         )
 
-        let userinfoURL = URL(string: "https://example.com/api/oauth/userinfo")!
+        let profileURL = URL(string: "https://example.com/api/oauth/profile")!
         let tokenURL = URL(string: "https://example.com/v1/oauth/token")!
 
         MockURLProtocol.handler = { request in
             let authorization = request.value(forHTTPHeaderField: "Authorization") ?? ""
 
             switch (request.httpMethod, request.url?.path, authorization) {
-            case ("GET", "/api/oauth/userinfo", "Bearer old-access"):
-                return try Self.httpResponse(url: userinfoURL, statusCode: 401)
+            case ("GET", "/api/oauth/profile", "Bearer old-access"):
+                return try Self.httpResponse(url: profileURL, statusCode: 401)
             case ("POST", "/v1/oauth/token", _):
                 return try Self.httpResponse(
                     url: tokenURL,
@@ -245,8 +245,8 @@ final class UsageServiceTests: XCTestCase {
                     }
                     """
                 )
-            case ("GET", "/api/oauth/userinfo", "Bearer new-access"):
-                return try Self.httpResponse(url: userinfoURL, statusCode: 401)
+            case ("GET", "/api/oauth/profile", "Bearer new-access"):
+                return try Self.httpResponse(url: profileURL, statusCode: 401)
             default:
                 XCTFail("Unexpected request: \(request)")
                 return try Self.httpResponse(url: request.url!, statusCode: 500)
@@ -256,10 +256,9 @@ final class UsageServiceTests: XCTestCase {
         let service = UsageService(
             session: makeSession(),
             usageEndpoint: URL(string: "https://example.com/api/oauth/usage")!,
-            userinfoEndpoint: userinfoURL,
+            profileEndpoint: profileURL,
             tokenEndpoint: tokenURL,
-            credentialsStore: store,
-            localProfileLoader: { nil }
+            credentialsStore: store
         )
 
         await service.fetchProfile()
@@ -271,6 +270,41 @@ final class UsageServiceTests: XCTestCase {
         let saved = try XCTUnwrap(store.load(defaultScopes: UsageService.defaultOAuthScopes))
         XCTAssertEqual(saved.accessToken, "new-access")
         XCTAssertEqual(saved.refreshToken, "refresh-new")
+    }
+
+    func testSigningInAsAnotherAccountShowsThatAccountsEmail() async throws {
+        MockURLProtocol.handler = { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("POST", "/v1/oauth/token"):
+                let code = Self.jsonBody(for: request)?["code"] ?? ""
+                return try Self.httpResponse(url: request.url!, statusCode: 200, body: """
+                {"access_token": "access-\(code)", "expires_in": 3600, "scope": "user:profile user:inference"}
+                """)
+            case ("GET", "/api/oauth/profile"):
+                let bearer = request.value(forHTTPHeaderField: "Authorization") ?? ""
+                let account = bearer.replacingOccurrences(of: "Bearer access-", with: "")
+                return try Self.httpResponse(url: request.url!, statusCode: 200, body: """
+                {"account": {"uuid": "\(account)", "email": "\(account)@example.com"}}
+                """)
+            case ("GET", "/api/oauth/usage"):
+                return try Self.httpResponse(url: request.url!, statusCode: 200, body: "{}")
+            default:
+                XCTFail("Unexpected request: \(request)")
+                return try Self.httpResponse(url: request.url!, statusCode: 500)
+            }
+        }
+        var openedURL: URL?
+        let service = makeOAuthService(store: try makeStore(), listener: false) { openedURL = $0 }
+        defer { service.signOut() }
+
+        for account in ["a", "b"] {
+            service.signOut()
+            await service.startOAuthFlow()
+            let state = try XCTUnwrap(queryItems(of: openedURL)["state"])
+            await service.submitOAuthCode("\(account)#\(state)")
+
+            XCTAssertEqual(service.accountEmail, "\(account)@example.com")
+        }
     }
 
     // MARK: - Transient vs permanent refresh failure
@@ -306,7 +340,7 @@ final class UsageServiceTests: XCTestCase {
         let service = UsageService(
             session: makeSession(),
             usageEndpoint: usageURL,
-            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             tokenEndpoint: tokenURL,
             credentialsStore: store
         )
@@ -349,7 +383,7 @@ final class UsageServiceTests: XCTestCase {
         let service = UsageService(
             session: makeSession(),
             usageEndpoint: usageURL,
-            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             tokenEndpoint: tokenURL,
             credentialsStore: store
         )
@@ -392,7 +426,7 @@ final class UsageServiceTests: XCTestCase {
         let service = UsageService(
             session: makeSession(),
             usageEndpoint: usageURL,
-            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             tokenEndpoint: tokenURL,
             credentialsStore: store
         )
@@ -435,7 +469,7 @@ final class UsageServiceTests: XCTestCase {
         let service = UsageService(
             session: makeSession(),
             usageEndpoint: usageURL,
-            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             tokenEndpoint: tokenURL,
             credentialsStore: store
         )
@@ -512,7 +546,7 @@ final class UsageServiceTests: XCTestCase {
         let service = UsageService(
             session: makeSession(),
             usageEndpoint: usageURL,
-            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             tokenEndpoint: tokenURL,
             credentialsStore: store
         )
@@ -621,7 +655,7 @@ final class UsageServiceTests: XCTestCase {
         let service = UsageService(
             session: makeSession(),
             usageEndpoint: usageURL,
-            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             tokenEndpoint: tokenURL,
             credentialsStore: store
         )
@@ -656,7 +690,7 @@ final class UsageServiceTests: XCTestCase {
         let service = UsageService(
             session: makeSession(),
             usageEndpoint: URL(string: "https://example.com/api/oauth/usage")!,
-            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
             credentialsStore: try makeStore()
         )
@@ -832,7 +866,7 @@ final class UsageServiceTests: XCTestCase {
         let service = UsageService(
             session: makeSession(),
             usageEndpoint: URL(string: "https://example.com/api/oauth/usage")!,
-            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
             credentialsStore: try makeStore(),
             urlOpener: { url in
@@ -860,10 +894,9 @@ final class UsageServiceTests: XCTestCase {
         return UsageService(
             session: makeSession(),
             usageEndpoint: URL(string: "https://example.com/api/oauth/usage")!,
-            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
             credentialsStore: store,
-            localProfileLoader: { "user@example.com" },
             urlOpener: { url in
                 opened(url)
                 return true
@@ -883,7 +916,7 @@ final class UsageServiceTests: XCTestCase {
         return (try XCTUnwrap(response as? HTTPURLResponse).statusCode, String(decoding: data, as: UTF8.self))
     }
 
-    /// Serves a successful token exchange and the usage fetch that follows sign-in.
+    /// Serves a successful token exchange and the profile and usage fetches that follow sign-in.
     private static func signInHandler(
         onTokenRequest: @escaping ([String: String]?) -> Void
     ) -> (URLRequest) throws -> (HTTPURLResponse, Data) {
@@ -894,6 +927,10 @@ final class UsageServiceTests: XCTestCase {
                 return try httpResponse(url: request.url!, statusCode: 200, body: """
                 {"access_token": "signed-in-access", "refresh_token": "signed-in-refresh", \
                 "expires_in": 3600, "scope": "user:profile user:inference"}
+                """)
+            case ("GET", "/api/oauth/profile"):
+                return try httpResponse(url: request.url!, statusCode: 200, body: """
+                {"account": {"uuid": "u", "email": "user@example.com"}}
                 """)
             case ("GET", "/api/oauth/usage"):
                 return try httpResponse(url: request.url!, statusCode: 200, body: """
