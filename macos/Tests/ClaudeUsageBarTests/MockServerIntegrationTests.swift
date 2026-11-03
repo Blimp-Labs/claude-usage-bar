@@ -69,8 +69,44 @@ final class MockServerIntegrationTests: XCTestCase {
         await service.fetchUsage()
 
         XCTAssertNil(service.lastError)
-        XCTAssertEqual(service.pct5h, 0.35, accuracy: 0.0001)
+        XCTAssertEqual(try XCTUnwrap(service.pct5h), 0.35, accuracy: 0.0001)
         XCTAssertEqual(service.pct7d, 0.55, accuracy: 0.0001)
+    }
+
+    // MARK: - Plans without a 5-hour window
+
+    func testUltraScenarioDropsTheFiveHourWindowEverywhere() async throws {
+        let service = try makeService()
+        let history = UsageHistoryService(
+            historyFileURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString)
+                .appendingPathExtension("json")
+        )
+        service.historyService = history
+        XCTAssertTrue(service.hasFiveHourWindow, "Assumed until a response says otherwise")
+
+        try await setScenario("ultra")
+        await service.fetchUsage()
+
+        XCTAssertNil(service.lastError)
+        XCTAssertNil(service.usage?.fiveHour)
+        XCTAssertNil(service.pct5h)
+        XCTAssertFalse(service.hasFiveHourWindow)
+        XCTAssertEqual(service.pct7d, 0.71, accuracy: 0.0001)
+        XCTAssertEqual(service.usage?.perModelWeekly.map(\.displayName), ["Fable"])
+        XCTAssertNil(try XCTUnwrap(history.history.dataPoints.last).pct5h)
+    }
+
+    func testFiveHourWindowReturnsWhenThePlanRegainsIt() async throws {
+        let service = try makeService()
+
+        try await setScenario("ultra")
+        await service.fetchUsage()
+        XCTAssertFalse(service.hasFiveHourWindow)
+
+        try await setScenario("normal")
+        await service.fetchUsage()
+        XCTAssertEqual(try XCTUnwrap(service.pct5h), 0.25, accuracy: 0.0001)
     }
 
     // MARK: - Polling across scenario changes

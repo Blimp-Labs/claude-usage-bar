@@ -37,8 +37,55 @@ final class UsageHistoryServiceTests: XCTestCase {
         service2.loadHistory()
 
         XCTAssertEqual(service2.history.dataPoints.count, 1)
-        XCTAssertEqual(try XCTUnwrap(service2.history.dataPoints.first).pct5h, 0.42, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(service2.history.dataPoints.first?.pct5h), 0.42, accuracy: 0.001)
         XCTAssertEqual(try XCTUnwrap(service2.history.dataPoints.first).pct7d, 0.88, accuracy: 0.001)
+    }
+
+    func testMissingFiveHourWindowRoundTripsAsNil() throws {
+        let service = makeService()
+        service.recordDataPoint(pct5h: nil, pct7d: 0.71)
+        service.flushToDisk()
+
+        let service2 = makeService()
+        service2.loadHistory()
+
+        let point = try XCTUnwrap(service2.history.dataPoints.first)
+        XCTAssertNil(point.pct5h)
+        XCTAssertEqual(point.pct7d, 0.71, accuracy: 0.001)
+    }
+
+    func testHistoryWrittenByEarlierVersionsStillLoads() throws {
+        let service = makeService()
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        FileManager.default.createFile(
+            atPath: service.historyFileURL.path,
+            contents: Data("""
+            {"dataPoints":[{"id":"\(UUID().uuidString)","timestamp":"\(stamp)","pct5h":0.25,"pct7d":0.5}]}
+            """.utf8)
+        )
+
+        service.loadHistory()
+
+        XCTAssertEqual(service.history.dataPoints.first?.pct5h, 0.25)
+    }
+
+    func testDownsamplingAveragesOnlyPointsThatHaveAFiveHourValue() {
+        let service = makeService()
+        let count = TimeRange.hour1.targetPointCount + 1
+        let start = Date().addingTimeInterval(-TimeRange.hour1.interval)
+        let step = TimeRange.hour1.interval / Double(count)
+        service.history.dataPoints = (0..<count).map { i in
+            UsageDataPoint(
+                timestamp: start.addingTimeInterval(Double(i) * step),
+                pct5h: i.isMultiple(of: 2) ? 0.6 : nil,
+                pct7d: 0.4
+            )
+        }
+
+        let fiveHour = service.downsampledPoints(for: .hour1).map(\.pct5h)
+
+        XCTAssertTrue(fiveHour.contains(nil))
+        XCTAssertEqual(Set(fiveHour.compactMap { $0 }), [0.6])
     }
 
     func testSecondFlushKeepsDataAndPermissions() throws {

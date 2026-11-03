@@ -37,17 +37,19 @@ private func drawRow(label: String, barX: CGFloat, barY: CGFloat, labelX: CGFloa
     drawBarFill(barX, barY)
 }
 
-func renderIcon(pct5h: Double, pct7d: Double) -> NSImage {
+func renderIcon(pct5h: Double?, pct7d: Double) -> NSImage {
     let image = NSImage(size: NSSize(width: iconWidth, height: iconHeight), flipped: true) { _ in
         let offset = logoSize + logoGap
         let barX = offset + labelWidth + labelGap
         let topY = (iconHeight - barHeight * 2 - rowGap) / 2
-        let bottomY = topY + barHeight + rowGap
+        let bottomY = pct5h == nil ? (iconHeight - barHeight) / 2 : topY + barHeight + rowGap
 
         drawClaudeLogo(x: 0, y: (iconHeight - logoSize) / 2, size: logoSize)
 
-        drawRow(label: "5h", barX: barX, barY: topY, labelX: offset) { x, y in
-            drawBar(x: x, y: y, width: barWidth, height: barHeight, cornerRadius: cornerRadius, pct: pct5h)
+        if let pct5h {
+            drawRow(label: "5h", barX: barX, barY: topY, labelX: offset) { x, y in
+                drawBar(x: x, y: y, width: barWidth, height: barHeight, cornerRadius: cornerRadius, pct: pct5h)
+            }
         }
         drawRow(label: "7d", barX: barX, barY: bottomY, labelX: offset) { x, y in
             drawBar(x: x, y: y, width: barWidth, height: barHeight, cornerRadius: cornerRadius, pct: pct7d)

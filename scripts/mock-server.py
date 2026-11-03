@@ -18,6 +18,7 @@ Scenarios:
                     - limits[] entry with a null resets_at (exercises reconciliation)
     fable_mixed     - Fable 5 via limits[], Opus/Sonnet via legacy seven_day_* fields
     all_features    - Everything enabled: per-model, extra usage
+    ultra           - No 5-hour window ("five_hour": null), as Ultra plans report
     unauthenticated - Returns 401 for all requests
     rate_limited    - Returns 429 with Retry-After header
     error           - Returns 500 server error
@@ -243,6 +244,30 @@ SCENARIOS = {
             "monthly_limit": 50000,
             "used_credits": 12750,
             "utilization": 25.5,
+        },
+    },
+    # Captured from an Ultra plan on 2026-11-03.
+    "ultra": {
+        "five_hour": None,
+        "seven_day": {"utilization": 71.0, "resets_at": iso_future(days=3)},
+        "seven_day_opus": None,
+        "seven_day_sonnet": None,
+        "seven_day_oauth_apps": None,
+        "seven_day_cowork": None,
+        "iguana_necktie": None,
+        "limits": [
+            {
+                "kind": "weekly_all", "group": "weekly", "percent": 71,
+                "severity": "normal", "resets_at": iso_future(days=3),
+                "scope": None, "is_active": True,
+            },
+            weekly_scoped("Fable", 0, days=3),
+        ],
+        "extra_usage": {
+            "is_enabled": False,
+            "monthly_limit": 200,
+            "used_credits": 0.0,
+            "utilization": 0.0,
         },
     },
 }

@@ -66,10 +66,12 @@ struct PopoverView: View {
 
     @ViewBuilder
     private var usageView: some View {
-        UsageBucketRow(
-            label: "5-Hour Window",
-            bucket: service.usage?.fiveHour
-        )
+        if service.hasFiveHourWindow {
+            UsageBucketRow(
+                label: "5-Hour Window",
+                bucket: service.usage?.fiveHour
+            )
+        }
 
         UsageBucketRow(
             label: "7-Day Window",

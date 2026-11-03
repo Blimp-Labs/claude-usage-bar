@@ -112,7 +112,13 @@ class UsageService: ObservableObject {
     private var codeVerifier: String?
     private var oauthState: String?
 
-    var pct5h: Double { (usage?.fiveHour?.utilization ?? 0) / 100.0 }
+    /// Nil when the server reports no 5-hour window (Ultra plans). Assumed until
+    /// the first response, so the icon doesn't change shape on launch.
+    var pct5h: Double? {
+        guard let usage else { return 0 }
+        return usage.fiveHour.map { ($0.utilization ?? 0) / 100.0 }
+    }
+    var hasFiveHourWindow: Bool { pct5h != nil }
     var pct7d: Double { (usage?.sevenDay?.utilization ?? 0) / 100.0 }
     var pctExtra: Double { (usage?.extraUsage?.utilization ?? 0) / 100.0 }
     var reset5h: Date? { usage?.fiveHour?.resetsAtDate }

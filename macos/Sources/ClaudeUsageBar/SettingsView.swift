@@ -29,11 +29,13 @@ struct SettingsWindowContent: View {
                         .foregroundStyle(.secondary)
                 }
 
-                ThresholdSlider(
-                    label: "5-hour window",
-                    value: notificationService.threshold5h,
-                    onChange: { notificationService.setThreshold5h($0) }
-                )
+                if service.hasFiveHourWindow {
+                    ThresholdSlider(
+                        label: "5-hour window",
+                        value: notificationService.threshold5h,
+                        onChange: { notificationService.setThreshold5h($0) }
+                    )
+                }
                 ThresholdSlider(
                     label: "7-day window",
                     value: notificationService.threshold7d,
