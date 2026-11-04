@@ -95,6 +95,11 @@ struct PopoverView: View {
         Divider()
         UsageChartView(historyService: historyService, showsFiveHour: service.hasFiveHourWindow)
 
+        if service.usage?.fiveHour != nil {
+            Divider()
+            ProjectionChartView(service: service, historyService: historyService)
+        }
+
         if let error = service.lastError {
             Divider()
             Label(error, systemImage: "exclamationmark.triangle")
