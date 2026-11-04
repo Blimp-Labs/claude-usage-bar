@@ -18,10 +18,9 @@ class UsageService: ObservableObject {
     private var timer: Timer?
     private let session: URLSession
     private let usageEndpoint: URL
-    private let userinfoEndpoint: URL
+    private let profileEndpoint: URL
     private let tokenEndpoint: URL
     private let credentialsStore: StoredCredentialsStore
-    private let localProfileLoader: @MainActor () -> String?
     private let urlOpener: @MainActor (URL) -> Bool
     private let startCallbackListener: (@escaping OAuthCallbackListener.Handler) async -> OAuthCallbackListener?
     private var callbackListener: OAuthCallbackListener?
@@ -33,6 +32,9 @@ class UsageService: ObservableObject {
     }
 
     private var refreshTask: Task<RefreshResult, Never>?
+    /// Bumped whenever the signed-in account may change, so a profile reply for
+    /// an earlier account can't overwrite the current one.
+    private var accountGeneration = 0
 
     static let defaultPollingMinutes = 30
     static let pollingOptions = [5, 15, 30, 60]
@@ -40,7 +42,7 @@ class UsageService: ObservableObject {
     nonisolated static let defaultOAuthScopes = ["user:profile", "user:inference"]
     nonisolated private static let authorizeEndpoint = URL(string: "https://claude.ai/oauth/authorize")!
     nonisolated private static let defaultUsageEndpoint = URL(string: "https://api.anthropic.com/api/oauth/usage")!
-    nonisolated private static let defaultUserinfoEndpoint = URL(string: "https://api.anthropic.com/api/oauth/userinfo")!
+    nonisolated private static let defaultProfileEndpoint = URL(string: "https://api.anthropic.com/api/oauth/profile")!
     nonisolated private static let defaultTokenEndpoint = URL(string: "https://platform.claude.com/v1/oauth/token")!
     nonisolated private static let defaultRedirectURI = "https://platform.claude.com/oauth/code/callback"
     nonisolated static let usageEndpointOverrideKey = "CLAUDE_USAGE_BAR_USAGE_ENDPOINT"
@@ -121,11 +123,10 @@ class UsageService: ObservableObject {
     init(
         session: URLSession = .shared,
         usageEndpoint: URL = UsageService.resolvedUsageEndpoint(),
-        userinfoEndpoint: URL = UsageService.defaultUserinfoEndpoint,
+        profileEndpoint: URL = UsageService.defaultProfileEndpoint,
         tokenEndpoint: URL = UsageService.defaultTokenEndpoint,
         redirectUri: String = UsageService.defaultRedirectURI,
         credentialsStore: StoredCredentialsStore = StoredCredentialsStore(),
-        localProfileLoader: @MainActor @escaping () -> String? = UsageService.loadLocalProfile,
         urlOpener: @MainActor @escaping (URL) -> Bool = { NSWorkspace.shared.open($0) },
         startCallbackListener: @escaping (@escaping OAuthCallbackListener.Handler) async -> OAuthCallbackListener? = {
             try? await OAuthCallbackListener.start(handler: $0)
@@ -133,11 +134,10 @@ class UsageService: ObservableObject {
     ) {
         self.session = session
         self.usageEndpoint = usageEndpoint
-        self.userinfoEndpoint = userinfoEndpoint
+        self.profileEndpoint = profileEndpoint
         self.tokenEndpoint = tokenEndpoint
         self.redirectUri = redirectUri
         self.credentialsStore = credentialsStore
-        self.localProfileLoader = localProfileLoader
         self.urlOpener = urlOpener
         self.startCallbackListener = startCallbackListener
         let stored = UserDefaults.standard.integer(forKey: "pollingMinutes")
@@ -151,11 +151,15 @@ class UsageService: ObservableObject {
 
     func startPolling() {
         guard isAuthenticated else { return }
-        Task {
-            await fetchUsage()
-            if accountEmail == nil { await fetchProfile() }
-        }
+        Task { await poll() }
         scheduleTimer()
+    }
+
+    /// Retries the profile too, so a lookup that failed at launch doesn't leave
+    /// Settings without an email until the next sign-in.
+    private func poll() async {
+        await fetchUsage()
+        if accountEmail == nil { await fetchProfile() }
     }
 
     private func scheduleTimer() {
@@ -163,7 +167,7 @@ class UsageService: ObservableObject {
         let t = Timer(timeInterval: currentInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, self.isAuthenticated else { return }
-                Task { await self.fetchUsage() }
+                Task { await self.poll() }
             }
         }
         RunLoop.main.add(t, forMode: .common)
@@ -337,6 +341,8 @@ class UsageService: ObservableObject {
                 return false
             }
             isAuthenticated = true
+            accountEmail = nil
+            accountGeneration += 1
             lastError = nil
             endOAuthFlow()
 
@@ -370,6 +376,7 @@ class UsageService: ObservableObject {
         usage = nil
         lastUpdated = nil
         accountEmail = nil
+        accountGeneration += 1
         timer?.invalidate()
         timer = nil
         refreshTask?.cancel()
@@ -452,46 +459,22 @@ class UsageService: ObservableObject {
     // MARK: - Profile
 
     func fetchProfile() async {
-        if let local = localProfileLoader() {
-            accountEmail = local
-            return
-        }
-
+        let generation = accountGeneration
         guard let result = try? await sendAuthorizedRequest(
-            to: userinfoEndpoint,
+            to: profileEndpoint,
             expireSessionOnAuthFailure: false
         ) else {
             return
         }
         let (data, http) = result
         guard http.statusCode == 200,
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let account = json["account"] as? [String: Any],
+              let email = account["email"] as? String, !email.isEmpty,
+              generation == accountGeneration else {
             return
         }
-
-        if let email = json["email"] as? String, !email.isEmpty {
-            accountEmail = email
-        } else if let name = json["name"] as? String, !name.isEmpty {
-            accountEmail = name
-        }
-    }
-
-    /// Try reading the email from Claude Code's local config as a fallback.
-    nonisolated private static func loadLocalProfile() -> String? {
-        let url = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude.json")
-        guard let data = try? Data(contentsOf: url),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let account = json["oauthAccount"] as? [String: Any] else {
-            return nil
-        }
-        if let email = account["emailAddress"] as? String, !email.isEmpty {
-            return email
-        }
-        if let name = account["displayName"] as? String, !name.isEmpty {
-            return name
-        }
-        return nil
+        accountEmail = email
     }
 
     // MARK: - Credential storage
@@ -728,6 +711,7 @@ class UsageService: ObservableObject {
         usage = nil
         lastUpdated = nil
         accountEmail = nil
+        accountGeneration += 1
         timer?.invalidate()
         timer = nil
         refreshTask?.cancel()
