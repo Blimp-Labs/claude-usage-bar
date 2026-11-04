@@ -11,6 +11,9 @@ class UsageService: ObservableObject {
     @Published private(set) var isAwaitingCode = false
     @Published private(set) var isWaitingForBrowser = false
     @Published private(set) var accountEmail: String?
+    /// False when the server reports no 5-hour window (Ultra plans). Remembered
+    /// so the menu bar icon has the right shape before the first fetch.
+    @Published private(set) var hasFiveHourWindow: Bool
 
     var historyService: UsageHistoryService?
     var notificationService: NotificationService?
@@ -22,6 +25,7 @@ class UsageService: ObservableObject {
     private let tokenEndpoint: URL
     private let credentialsStore: StoredCredentialsStore
     private let urlOpener: @MainActor (URL) -> Bool
+    private let defaults: UserDefaults
     private let startCallbackListener: (@escaping OAuthCallbackListener.Handler) async -> OAuthCallbackListener?
     private var callbackListener: OAuthCallbackListener?
     private var currentInterval: TimeInterval
@@ -46,6 +50,7 @@ class UsageService: ObservableObject {
     nonisolated private static let defaultTokenEndpoint = URL(string: "https://platform.claude.com/v1/oauth/token")!
     nonisolated private static let defaultRedirectURI = "https://platform.claude.com/oauth/code/callback"
     nonisolated static let usageEndpointOverrideKey = "CLAUDE_USAGE_BAR_USAGE_ENDPOINT"
+    nonisolated private static let hasFiveHourWindowKey = "hasFiveHourWindow"
     nonisolated private static let loopbackHosts: Set<String> = ["localhost", "127.0.0.1", "::1"]
 
     /// Endpoint override for testing against `scripts/mock-server.py`.
@@ -130,7 +135,8 @@ class UsageService: ObservableObject {
         urlOpener: @MainActor @escaping (URL) -> Bool = { NSWorkspace.shared.open($0) },
         startCallbackListener: @escaping (@escaping OAuthCallbackListener.Handler) async -> OAuthCallbackListener? = {
             try? await OAuthCallbackListener.start(handler: $0)
-        }
+        },
+        defaults: UserDefaults = .standard
     ) {
         self.session = session
         self.usageEndpoint = usageEndpoint
@@ -140,6 +146,8 @@ class UsageService: ObservableObject {
         self.credentialsStore = credentialsStore
         self.urlOpener = urlOpener
         self.startCallbackListener = startCallbackListener
+        self.defaults = defaults
+        self.hasFiveHourWindow = defaults.object(forKey: Self.hasFiveHourWindowKey) as? Bool ?? true
         let stored = UserDefaults.standard.integer(forKey: "pollingMinutes")
         let minutes = Self.pollingOptions.contains(stored) ? stored : Self.defaultPollingMinutes
         self.pollingMinutes = minutes
@@ -443,6 +451,8 @@ class UsageService: ObservableObject {
             let decoded = try JSONDecoder().decode(UsageResponse.self, from: data)
             let reconciled = decoded.reconciled(with: usage)
             usage = reconciled
+            hasFiveHourWindow = reconciled.fiveHour != nil
+            defaults.set(hasFiveHourWindow, forKey: Self.hasFiveHourWindowKey)
             lastError = nil
             lastUpdated = Date()
             historyService?.recordDataPoint(pct5h: pct5h, pct7d: pct7d)

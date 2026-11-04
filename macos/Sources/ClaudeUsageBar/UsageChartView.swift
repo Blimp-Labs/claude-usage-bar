@@ -3,6 +3,7 @@ import Charts
 
 struct UsageChartView: View {
     @ObservedObject var historyService: UsageHistoryService
+    let showsFiveHour: Bool
     @State private var selectedRange: TimeRange = .day1
     @State private var hoverDate: Date?
 
@@ -35,14 +36,18 @@ struct UsageChartView: View {
             UsageChartInterpolation.interpolateValues(at: $0, in: points)
         }
 
+        let windows = showsFiveHour ? ["5h", "7d"] : ["7d"]
+
         Chart {
-            ForEach(points) { point in
-                LineMark(
-                    x: .value("Time", point.timestamp),
-                    y: .value("Usage", point.pct5h * 100)
-                )
-                .foregroundStyle(by: .value("Window", "5h"))
-                .interpolationMethod(.catmullRom)
+            if showsFiveHour {
+                ForEach(points) { point in
+                    LineMark(
+                        x: .value("Time", point.timestamp),
+                        y: .value("Usage", point.pct5h * 100)
+                    )
+                    .foregroundStyle(by: .value("Window", "5h"))
+                    .interpolationMethod(.catmullRom)
+                }
             }
 
             ForEach(points) { point in
@@ -59,12 +64,14 @@ struct UsageChartView: View {
                     .foregroundStyle(.secondary.opacity(0.4))
                     .lineStyle(StrokeStyle(lineWidth: 1))
 
-                PointMark(
-                    x: .value("Time", iv.date),
-                    y: .value("Usage", iv.pct5h * 100)
-                )
-                .foregroundStyle(.blue)
-                .symbolSize(24)
+                if showsFiveHour {
+                    PointMark(
+                        x: .value("Time", iv.date),
+                        y: .value("Usage", iv.pct5h * 100)
+                    )
+                    .foregroundStyle(.blue)
+                    .symbolSize(24)
+                }
 
                 PointMark(
                     x: .value("Time", iv.date),
@@ -94,10 +101,11 @@ struct UsageChartView: View {
                 AxisGridLine()
             }
         }
-        .chartForegroundStyleScale([
-            "5h": Color.blue,
-            "7d": Color.orange
-        ])
+        // A fixed "5h"/"7d" scale would keep a 5h legend entry with no line.
+        .chartForegroundStyleScale(
+            domain: windows,
+            range: windows.map { $0 == "5h" ? Color.blue : Color.orange }
+        )
         .chartLegend(.visible)
         .chartPlotStyle { plot in
             plot.clipped()
@@ -122,9 +130,11 @@ struct UsageChartView: View {
                 .font(.system(size: 9))
                 .foregroundStyle(.secondary)
             HStack(spacing: 6) {
-                Label("\(Int(round(pct5h * 100)))%", systemImage: "circle.fill")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(.blue)
+                if showsFiveHour {
+                    Label("\(Int(round(pct5h * 100)))%", systemImage: "circle.fill")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.blue)
+                }
                 Label("\(Int(round(pct7d * 100)))%", systemImage: "circle.fill")
                     .font(.system(size: 9, weight: .medium))
                     .foregroundStyle(.orange)

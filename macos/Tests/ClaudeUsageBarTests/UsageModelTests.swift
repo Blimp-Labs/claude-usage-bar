@@ -499,6 +499,37 @@ final class UsageModelTests: XCTestCase {
         XCTAssertEqual(response.perModelWeekly.map(\.displayName), ["Fable"])
     }
 
+    /// Captured from an Ultra plan on 2026-11-03, trimmed.
+    func testRealUltraPayloadHasNoFiveHourWindow() throws {
+        let response = try decode("""
+        {
+          "five_hour": null,
+          "seven_day": {"utilization": 71.0, "resets_at": "2026-11-07T02:59:59.662283+00:00",
+                        "limit_dollars": null, "used_dollars": null, "remaining_dollars": null,
+                        "locked_reason": null},
+          "seven_day_oauth_apps": null, "seven_day_opus": null, "seven_day_sonnet": null,
+          "iguana_necktie": {"utilization": 0.0, "resets_at": "2026-11-05T07:59:00+00:00",
+                             "limit_dollars": 250, "used_dollars": 0.0, "remaining_dollars": 250.0,
+                             "locked_reason": null},
+          "extra_usage": {"is_enabled": false, "monthly_limit": 200, "used_credits": 0.0,
+                          "utilization": 0.0, "currency": "USD", "decimal_places": 2,
+                          "disabled_reason": "out_of_credits"},
+          "limits": [
+            {"kind": "weekly_all", "group": "weekly", "percent": 71, "severity": "normal",
+             "resets_at": "2026-11-07T02:59:59.662283+00:00", "scope": null, "is_active": true},
+            {"kind": "weekly_scoped", "group": "weekly", "percent": 0, "severity": "normal",
+             "resets_at": "2026-11-07T03:00:00+00:00",
+             "scope": {"model": {"id": null, "display_name": "Fable"}, "surface": null},
+             "is_active": false}
+          ]
+        }
+        """)
+
+        XCTAssertNil(response.fiveHour)
+        XCTAssertEqual(response.sevenDay?.utilization, 71.0)
+        XCTAssertEqual(response.perModelWeekly.map(\.displayName), ["Fable"])
+    }
+
     private func decode(_ json: String) throws -> UsageResponse {
         try JSONDecoder().decode(UsageResponse.self, from: Data(json.utf8))
     }

@@ -135,6 +135,7 @@ Available scenarios:
 | `model_scoped_no_reset` | A `limits[]` entry with a null `resets_at` (exercises reconciliation) |
 | `fable_mixed` | Fable 5 via `limits[]`, Opus/Sonnet via the fixed fields |
 | `all_features` | Everything: per-model + extra usage |
+| `ultra` | No 5-hour window (`five_hour: null`), as Ultra plans report |
 | `unauthenticated` | Returns 401 |
 | `rate_limited` | Returns 429 with Retry-After |
 | `error` | Returns 500 |
