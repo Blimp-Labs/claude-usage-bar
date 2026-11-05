@@ -66,7 +66,7 @@ Your data stays on your Mac, in `~/.config/claude-usage-bar/`:
 | File | Contents |
 |------|----------|
 | `credentials.json` | Your sign-in tokens, readable only by you |
-| `history.json` | Usage history for the chart, kept for 30 days, readable only by you |
+| `history.json` | Usage history for the chart, for each account you sign into, kept for 30 days, readable only by you |
 
 The app only connects to:
 

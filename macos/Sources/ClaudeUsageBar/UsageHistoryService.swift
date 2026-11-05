@@ -62,8 +62,22 @@ class UsageHistoryService: ObservableObject {
 
     // MARK: - Record
 
+    /// Pass nil whenever the signed-in account may change, until its profile identifies it.
+    func setAccount(_ account: String?) {
+        guard account != history.account else { return }
+        history.account = account
+        if let account {
+            for i in history.dataPoints.indices where history.dataPoints[i].account == nil {
+                history.dataPoints[i].account = account
+            }
+        }
+        isDirty = true
+        // Saved now, or a crash could leave a relaunch recording the new account under the old one.
+        flushToDisk()
+    }
+
     func recordDataPoint(pct5h: Double, pct7d: Double) {
-        let point = UsageDataPoint(pct5h: pct5h, pct7d: pct7d)
+        let point = UsageDataPoint(pct5h: pct5h, pct7d: pct7d, account: history.account)
         history.dataPoints.append(point)
         isDirty = true
         startFlushTimerIfNeeded()
@@ -118,7 +132,7 @@ class UsageHistoryService: ObservableObject {
     // MARK: - Downsampling
 
     func downsampledPoints(for range: TimeRange) -> [UsageDataPoint] {
-        let allPoints = history.dataPoints
+        let allPoints = history.dataPoints.filter { $0.account == history.account }
 
         guard allPoints.count > range.targetPointCount else { return allPoints }
 

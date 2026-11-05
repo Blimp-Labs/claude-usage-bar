@@ -349,8 +349,7 @@ class UsageService: ObservableObject {
                 return false
             }
             isAuthenticated = true
-            accountEmail = nil
-            accountGeneration += 1
+            forgetAccount()
             lastError = nil
             endOAuthFlow()
 
@@ -383,8 +382,7 @@ class UsageService: ObservableObject {
         isAuthenticated = false
         usage = nil
         lastUpdated = nil
-        accountEmail = nil
-        accountGeneration += 1
+        forgetAccount()
         timer?.invalidate()
         timer = nil
         refreshTask?.cancel()
@@ -480,11 +478,21 @@ class UsageService: ObservableObject {
         guard http.statusCode == 200,
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let account = json["account"] as? [String: Any],
+              let accountID = account["uuid"] as? String,
               let email = account["email"] as? String, !email.isEmpty,
+              let organizationID = (json["organization"] as? [String: Any])?["uuid"] as? String,
               generation == accountGeneration else {
             return
         }
         accountEmail = email
+        // Limits belong to the organization, so one login in two orgs keeps two histories.
+        historyService?.setAccount("\(organizationID)/\(accountID)")
+    }
+
+    private func forgetAccount() {
+        accountEmail = nil
+        accountGeneration += 1
+        historyService?.setAccount(nil)
     }
 
     // MARK: - Credential storage
@@ -720,8 +728,7 @@ class UsageService: ObservableObject {
         isAuthenticated = false
         usage = nil
         lastUpdated = nil
-        accountEmail = nil
-        accountGeneration += 1
+        forgetAccount()
         timer?.invalidate()
         timer = nil
         refreshTask?.cancel()

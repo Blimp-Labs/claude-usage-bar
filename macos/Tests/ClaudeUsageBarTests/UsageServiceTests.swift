@@ -288,7 +288,7 @@ final class UsageServiceTests: XCTestCase {
                 let bearer = request.value(forHTTPHeaderField: "Authorization") ?? ""
                 let account = bearer.replacingOccurrences(of: "Bearer access-", with: "")
                 return try Self.httpResponse(url: request.url!, statusCode: 200, body: """
-                {"account": {"uuid": "\(account)", "email": "\(account)@example.com"}}
+                {"account": {"uuid": "\(account)", "email": "\(account)@example.com"}, "organization": {"uuid": "org"}}
                 """)
             case ("GET", "/api/oauth/usage"):
                 return try Self.httpResponse(url: request.url!, statusCode: 200, body: "{}")
@@ -310,6 +310,8 @@ final class UsageServiceTests: XCTestCase {
         var openedURL: URL?
         let service = makeOAuthService(store: store, listener: false) { openedURL = $0 }
         defer { service.signOut() }
+        let history = UsageHistoryService(historyFileURL: store.directoryURL.appendingPathComponent("history.json"))
+        service.historyService = history
 
         let accountAProfile = Task { await service.fetchProfile() }
         await fulfillment(of: [accountASent], timeout: 5)
@@ -323,6 +325,7 @@ final class UsageServiceTests: XCTestCase {
         await accountAProfile.value
 
         XCTAssertEqual(service.accountEmail, "b@example.com")
+        XCTAssertEqual(history.history.account, "org/b")
     }
 
     // MARK: - Transient vs permanent refresh failure
@@ -948,7 +951,7 @@ final class UsageServiceTests: XCTestCase {
                 """)
             case ("GET", "/api/oauth/profile"):
                 return try httpResponse(url: request.url!, statusCode: 200, body: """
-                {"account": {"uuid": "u", "email": "user@example.com"}}
+                {"account": {"uuid": "u", "email": "user@example.com"}, "organization": {"uuid": "org"}}
                 """)
             case ("GET", "/api/oauth/usage"):
                 return try httpResponse(url: request.url!, statusCode: 200, body: """
