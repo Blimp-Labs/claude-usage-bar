@@ -79,4 +79,40 @@ final class UsageHistoryServiceTests: XCTestCase {
         let attrs = try FileManager.default.attributesOfItem(atPath: service.historyFileURL.path)
         XCTAssertEqual(attrs[.posixPermissions] as? Int, 0o600)
     }
+
+    // MARK: - Accounts
+
+    func testChartsOnlyTheCurrentAccountsPoints() {
+        let service = makeService()
+        service.setAccount("a")
+        service.recordDataPoint(pct5h: 0.9, pct7d: 0.9)
+        service.setAccount("b")
+        service.recordDataPoint(pct5h: 0.1, pct7d: 0.1)
+
+        XCTAssertEqual(service.downsampledPoints(for: .day1).map(\.pct7d), [0.1])
+        service.setAccount("a")
+        XCTAssertEqual(service.downsampledPoints(for: .day1).map(\.pct7d), [0.9])
+    }
+
+    func testFirstAccountAdoptsHistoryWithoutAccounts() throws {
+        let service = makeService()
+        let now = ISO8601DateFormatter().string(from: Date())
+        try Data("""
+        {"dataPoints":[{"id":"D675905D-4D12-4AB6-A444-5C3993ED9AE9","timestamp":"\(now)","pct5h":0.3,"pct7d":0.4}]}
+        """.utf8).write(to: service.historyFileURL)
+        service.loadHistory()
+
+        service.setAccount("a")
+        XCTAssertEqual(service.downsampledPoints(for: .day1).map(\.pct7d), [0.4])
+        service.setAccount("b")
+        XCTAssertTrue(service.downsampledPoints(for: .day1).isEmpty)
+    }
+
+    func testAccountIsSavedImmediately() {
+        makeService().setAccount("a")
+
+        let relaunched = makeService()
+        relaunched.loadHistory()
+        XCTAssertEqual(relaunched.history.account, "a")
+    }
 }
