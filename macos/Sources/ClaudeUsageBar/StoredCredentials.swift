@@ -62,27 +62,29 @@ struct StoredCredentialsStore {
         try? fileManager.removeItem(at: legacyTokenFileURL)
     }
 
-    /// Most recently used first. Throws when the file is there but can't be read,
-    /// so a failed read is never saved back as no accounts. A file it can read but
-    /// not decode counts as none, so signing in can replace it.
+    /// Most recently used first. Throws when the file is there but can't be read or
+    /// decoded, so it's never saved over as no accounts.
     func loadAccounts(defaultScopes: [String]) throws -> [StoredAccount] {
-        var data: Data?
+        let credentials: StoredCredentials
         if fileManager.fileExists(atPath: credentialsFileURL.path) {
-            data = try Data(contentsOf: credentialsFileURL)
-        }
-        if let data, let file = try? Self.decoder.decode(AccountsFile.self, from: data) {
-            return file.accounts
-        }
-
-        // Earlier versions saved one account. Saved again now, or it gets a new id on every load.
-        guard let credentials = data.flatMap({ try? Self.decoder.decode(StoredCredentials.self, from: $0) })
-                ?? legacyToken(defaultScopes: defaultScopes) else {
+            let data = try Data(contentsOf: credentialsFileURL)
+            if let file = try? Self.decoder.decode(AccountsFile.self, from: data) {
+                return file.accounts
+            }
+            credentials = try Self.decoder.decode(StoredCredentials.self, from: data)
+        } else if let token = legacyToken(defaultScopes: defaultScopes) {
+            credentials = token
+        } else {
             return []
         }
-        let accounts = [StoredAccount(credentials: credentials)]
-        try save(accounts)
+
+        // Earlier versions saved one account. Its fixed id stays the same even if this save fails.
+        let accounts = [StoredAccount(id: Self.migratedAccountID, credentials: credentials)]
+        try? save(accounts)
         return accounts
     }
+
+    private static let migratedAccountID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
 
     private func legacyToken(defaultScopes: [String]) -> StoredCredentials? {
         guard let data = try? Data(contentsOf: legacyTokenFileURL),

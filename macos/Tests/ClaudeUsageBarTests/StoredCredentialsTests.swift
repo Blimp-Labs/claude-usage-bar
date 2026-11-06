@@ -45,11 +45,12 @@ final class StoredCredentialsTests: XCTestCase {
         XCTAssertEqual(try store.loadAccounts(defaultScopes: []), migrated)
     }
 
-    func testStoreThrowsInsteadOfLoadingAnUnreadableFileAsNoAccounts() throws {
+    func testStoreThrowsInsteadOfLoadingAFileItCantReadAsNoAccounts() throws {
         let store = try makeStore()
-        try store.save([StoredAccount(credentials: StoredCredentials(accessToken: "a", refreshToken: nil, expiresAt: nil, scopes: []))])
-        try setPermissions(0o000, of: store.credentialsFileURL)
+        try Data("not json".utf8).write(to: store.credentialsFileURL)
+        XCTAssertThrowsError(try store.loadAccounts(defaultScopes: []))
 
+        try setPermissions(0o000, of: store.credentialsFileURL)
         XCTAssertThrowsError(try store.loadAccounts(defaultScopes: []))
     }
 

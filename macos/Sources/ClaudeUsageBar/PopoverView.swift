@@ -48,9 +48,7 @@ struct PopoverView: View {
         }
 
         if let error = service.lastError {
-            Label(error, systemImage: "exclamationmark.triangle")
-                .foregroundStyle(.red)
-                .font(.caption)
+            ErrorLabel(message: error)
         }
 
         Divider()
@@ -97,9 +95,7 @@ struct PopoverView: View {
 
         if let error = service.lastError {
             Divider()
-            Label(error, systemImage: "exclamationmark.triangle")
-                .foregroundStyle(.red)
-                .font(.caption)
+            ErrorLabel(message: error)
         }
 
         Divider()
@@ -322,6 +318,16 @@ struct CodeEntryView: View {
     private func submit() {
         let value = code
         Task { await service.submitOAuthCode(value) }
+    }
+}
+
+struct ErrorLabel: View {
+    let message: String
+
+    var body: some View {
+        Label(message, systemImage: "exclamationmark.triangle")
+            .foregroundStyle(.red)
+            .font(.caption)
     }
 }
 

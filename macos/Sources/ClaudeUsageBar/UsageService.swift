@@ -158,8 +158,12 @@ class UsageService: ObservableObject {
         do {
             accounts = try credentialsStore.loadAccounts(defaultScopes: Self.defaultOAuthScopes)
         } catch {
-            lastError = "Could not read saved accounts: \(error.localizedDescription)"
+            lastError = Self.unreadableAccountsMessage(error)
         }
+    }
+
+    private static func unreadableAccountsMessage(_ error: Error) -> String {
+        "Could not read saved accounts (\(error.localizedDescription)). Delete ~/.config/claude-usage-bar/credentials.json and sign in again."
     }
 
     // MARK: - Polling
@@ -434,11 +438,14 @@ class UsageService: ObservableObject {
         usage = nil
         lastUpdated = nil
         lastError = nil
-        currentInterval = baseInterval
         historyService?.setAccount(accounts.first?.profileID)
         if accounts.isEmpty {
             timer?.invalidate()
             timer = nil
+        } else if currentInterval != baseInterval {
+            // The backoff was for the previous account.
+            currentInterval = baseInterval
+            if timer != nil { scheduleTimer() }
         }
     }
 
@@ -553,6 +560,7 @@ class UsageService: ObservableObject {
         }
         // Limits belong to the organization, so one login in two orgs is two accounts.
         let profileID = "\(organizationID)/\(accountID)"
+        let shown = accounts.first?.id
         do {
             try updateAccounts { accounts in
                 guard let index = accounts.firstIndex(where: { $0.id == id }) else { return }
@@ -565,6 +573,8 @@ class UsageService: ObservableObject {
         } catch {
             return
         }
+        // The shown account was an earlier sign-in to this one and was just removed.
+        if accounts.first?.id != shown { startPolling() }
         if isShown(id) { historyService?.setAccount(profileID) }
     }
 
@@ -581,7 +591,7 @@ class UsageService: ObservableObject {
                 show(try loadSavedAccounts())
                 if !isShown(id) { startPolling() }
             } catch {
-                lastError = "Could not read saved accounts: \(error.localizedDescription)"
+                lastError = Self.unreadableAccountsMessage(error)
             }
             return nil
         }

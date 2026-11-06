@@ -110,9 +110,7 @@ private struct AccountSection: View {
             }
 
             if let error = service.lastError {
-                Label(error, systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.red)
-                    .font(.caption)
+                ErrorLabel(message: error)
             }
 
             if service.isAwaitingCode {
