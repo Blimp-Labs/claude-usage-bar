@@ -18,7 +18,10 @@ class UsageService: ObservableObject {
     var isAuthenticated: Bool { !accounts.isEmpty }
     var accountEmail: String? { accounts.first?.email }
 
-    var historyService: UsageHistoryService?
+    var historyService: UsageHistoryService? {
+        // The saved accounts decide which history to chart, should history.json disagree after a crash.
+        didSet { historyService?.setAccount(accounts.first?.profileID) }
+    }
     var notificationService: NotificationService?
 
     private var timer: Timer?

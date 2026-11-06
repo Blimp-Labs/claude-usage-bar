@@ -513,6 +513,17 @@ final class UsageServiceTests: XCTestCase {
         XCTAssertEqual(service.accounts, [a, b])
     }
 
+    func testHistoryChartsTheSavedAccount() throws {
+        let store = try makeStore()
+        try store.save([Self.account("a")])
+        let history = UsageHistoryService(historyFileURL: store.directoryURL.appendingPathComponent("history.json"))
+        history.setAccount("org/other")
+
+        makeOAuthService(store: store, listener: false).historyService = history
+
+        XCTAssertEqual(history.history.account, "org/a")
+    }
+
     func testUsageForAnAccountWithoutAProfileIsNotFiledUnderAnother() async throws {
         let store = try makeStore()
         let a = Self.account("a")
