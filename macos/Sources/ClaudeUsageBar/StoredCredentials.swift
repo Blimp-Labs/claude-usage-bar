@@ -22,6 +22,15 @@ struct StoredCredentials: Codable, Equatable {
     }
 }
 
+struct StoredAccount: Codable, Equatable, Identifiable {
+    var id = UUID()
+    var credentials: StoredCredentials
+    /// `organization/account` from the profile; nil until it loads.
+    var profileID: String?
+    var email: String?
+    var organizationName: String?
+}
+
 struct StoredCredentialsStore {
     private let fileManager: FileManager
     let directoryURL: URL
@@ -39,20 +48,38 @@ struct StoredCredentialsStore {
         self.legacyTokenFileURL = directoryURL.appendingPathComponent("token")
     }
 
-    func save(_ credentials: StoredCredentials) throws {
+    /// Saving no accounts deletes the file.
+    func save(_ accounts: [StoredAccount]) throws {
+        guard !accounts.isEmpty else {
+            try? fileManager.removeItem(at: credentialsFileURL)
+            try? fileManager.removeItem(at: legacyTokenFileURL)
+            return
+        }
         try ensureDirectoryExists()
-        let data = try Self.encoder.encode(credentials)
+        let data = try Self.encoder.encode(AccountsFile(accounts: accounts))
         try data.write(to: credentialsFileURL, options: .atomic)
         try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: credentialsFileURL.path)
         try? fileManager.removeItem(at: legacyTokenFileURL)
     }
 
-    func load(defaultScopes: [String]) -> StoredCredentials? {
-        if let data = try? Data(contentsOf: credentialsFileURL),
-           let credentials = try? Self.decoder.decode(StoredCredentials.self, from: data) {
-            return credentials
+    /// Most recently used first.
+    func loadAccounts(defaultScopes: [String]) -> [StoredAccount] {
+        let data = try? Data(contentsOf: credentialsFileURL)
+        if let data, let file = try? Self.decoder.decode(AccountsFile.self, from: data) {
+            return file.accounts
         }
 
+        // Earlier versions saved one account. Resaved so its id stays the same on the next load.
+        guard let credentials = data.flatMap({ try? Self.decoder.decode(StoredCredentials.self, from: $0) })
+                ?? legacyToken(defaultScopes: defaultScopes) else {
+            return []
+        }
+        let accounts = [StoredAccount(credentials: credentials)]
+        try? save(accounts)
+        return accounts
+    }
+
+    private func legacyToken(defaultScopes: [String]) -> StoredCredentials? {
         guard let data = try? Data(contentsOf: legacyTokenFileURL),
               let token = String(data: data, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
@@ -68,9 +95,8 @@ struct StoredCredentialsStore {
         )
     }
 
-    func delete() {
-        try? fileManager.removeItem(at: credentialsFileURL)
-        try? fileManager.removeItem(at: legacyTokenFileURL)
+    private struct AccountsFile: Codable {
+        var accounts: [StoredAccount]
     }
 
     private func ensureDirectoryExists() throws {

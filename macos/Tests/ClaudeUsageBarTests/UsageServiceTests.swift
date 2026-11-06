@@ -328,6 +328,135 @@ final class UsageServiceTests: XCTestCase {
         XCTAssertEqual(history.history.account, "org/b")
     }
 
+    // MARK: - Switching accounts
+
+    func testSwitchingShowsTheOtherAccountsUsage() async throws {
+        let store = try makeStore()
+        let (a, b) = (Self.account("a"), Self.account("b"))
+        try store.save([a, b])
+        MockURLProtocol.handler = Self.usageByAccountHandler
+        let service = makeOAuthService(store: store, listener: false)
+        defer { signOutAll(service) }
+
+        await service.fetchUsage()
+        service.switchAccount(to: b.id)
+        XCTAssertNil(service.usage)
+        await service.fetchUsage()
+
+        XCTAssertEqual(service.accountEmail, "b@example.com")
+        XCTAssertEqual(service.usage?.sevenDay?.utilization, Self.utilization["b"])
+        XCTAssertEqual(store.loadAccounts(defaultScopes: []).map(\.id), [b.id, a.id])
+    }
+
+    func testSigningOutMovesToTheAccountUsedLast() throws {
+        let store = try makeStore()
+        let (a, b, c) = (Self.account("a"), Self.account("b"), Self.account("c"))
+        try store.save([a, b, c])
+        let service = makeOAuthService(store: store, listener: false)
+        defer { signOutAll(service) }
+        let history = UsageHistoryService(historyFileURL: store.directoryURL.appendingPathComponent("history.json"))
+        service.historyService = history
+
+        service.switchAccount(to: b.id)
+        service.switchAccount(to: c.id)
+        service.signOut()
+
+        XCTAssertEqual(service.accountEmail, "b@example.com")
+        XCTAssertEqual(history.history.account, "org/b")
+        XCTAssertEqual(store.loadAccounts(defaultScopes: []).map(\.id), [b.id, a.id])
+    }
+
+    func testSigningInAgainToAnAccountReplacesItsEarlierSignIn() async throws {
+        let store = try makeStore()
+        let earlier = Self.account("u")
+        let other = Self.account("other")
+        try store.save([other, earlier])
+        var openedURL: URL?
+        MockURLProtocol.handler = Self.signInHandler { _ in }
+        let service = makeOAuthService(store: store, listener: false) { openedURL = $0 }
+        defer { signOutAll(service) }
+
+        await service.startOAuthFlow()
+        let state = try XCTUnwrap(queryItems(of: openedURL)["state"])
+        await service.submitOAuthCode("auth-code#\(state)")
+
+        XCTAssertEqual(service.accounts.map(\.profileID), ["org/u", "org/other"])
+        XCTAssertEqual(service.accounts.first?.credentials.accessToken, "signed-in-access")
+        XCTAssertEqual(store.loadAccounts(defaultScopes: []), service.accounts)
+    }
+
+    func testARefreshFinishingAfterASwitchIsSavedToItsOwnAccount() async throws {
+        let store = try makeStore()
+        var a = Self.account("a")
+        a.credentials = StoredCredentials(
+            accessToken: "access-a", refreshToken: "refresh-a",
+            expiresAt: Date().addingTimeInterval(60), scopes: UsageService.defaultOAuthScopes
+        )
+        let b = Self.account("b")
+        try store.save([a, b])
+        MockURLProtocol.handler = { request in
+            guard request.url?.path == "/v1/oauth/token" else { return try Self.usageByAccountHandler(request) }
+            return try Self.httpResponse(url: request.url!, statusCode: 200, body: """
+            {"access_token": "access-a", "refresh_token": "refresh-a2", "expires_in": 3600}
+            """)
+        }
+        let refreshSent = expectation(description: "account A's refresh sent")
+        let releaseRefresh = DispatchSemaphore(value: 0)
+        MockURLProtocol.hold = (
+            matches: { request in
+                guard request.url?.path == "/v1/oauth/token" else { return false }
+                refreshSent.fulfill()
+                return true
+            },
+            until: releaseRefresh
+        )
+        let service = makeOAuthService(store: store, listener: false)
+        defer { signOutAll(service) }
+
+        let fetchA = Task { await service.fetchUsage() }
+        await fulfillment(of: [refreshSent], timeout: 5)
+        service.switchAccount(to: b.id)
+        await service.fetchUsage()
+        releaseRefresh.signal()
+        await fetchA.value
+
+        XCTAssertEqual(service.usage?.sevenDay?.utilization, Self.utilization["b"])
+        let saved = store.loadAccounts(defaultScopes: [])
+        XCTAssertEqual(saved.first { $0.id == a.id }?.credentials.refreshToken, "refresh-a2")
+        XCTAssertEqual(saved.first { $0.id == b.id }?.credentials, b.credentials)
+    }
+
+    private static func account(_ name: String) -> StoredAccount {
+        StoredAccount(
+            credentials: StoredCredentials(
+                accessToken: "access-\(name)", refreshToken: nil, expiresAt: nil,
+                scopes: UsageService.defaultOAuthScopes
+            ),
+            profileID: "org/\(name)",
+            email: "\(name)@example.com"
+        )
+    }
+
+    private static let utilization = ["a": 10.0, "b": 20.0, "c": 30.0]
+
+    /// Serves each `account(_:)` its own 7-day utilization.
+    private static func usageByAccountHandler(_ request: URLRequest) throws -> (HTTPURLResponse, Data) {
+        let bearer = request.value(forHTTPHeaderField: "Authorization") ?? ""
+        guard request.url?.path == "/api/oauth/usage", bearer.hasPrefix("Bearer access-") else {
+            XCTFail("Unexpected request: \(request)")
+            return try httpResponse(url: request.url!, statusCode: 500)
+        }
+        let name = String(bearer.dropFirst("Bearer access-".count))
+        return try httpResponse(url: request.url!, statusCode: 200, body: """
+        {"seven_day": {"utilization": \(utilization[name] ?? 0), "resets_at": "2026-03-15T18:00:00Z"}}
+        """)
+    }
+
+    /// Stops polling, so it can't reach a later test's handler.
+    private func signOutAll(_ service: UsageService) {
+        while service.isAuthenticated { service.signOut() }
+    }
+
     // MARK: - Transient vs permanent refresh failure
 
     func testServer500DuringRefreshStaysAuthenticated() async throws {

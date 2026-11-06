@@ -261,7 +261,7 @@ private struct SetupView: View {
 
 // MARK: - Subviews
 
-private struct BrowserSignInView: View {
+struct BrowserSignInView: View {
     @ObservedObject var service: UsageService
 
     var body: some View {
@@ -283,7 +283,7 @@ private struct BrowserSignInView: View {
     }
 }
 
-private struct CodeEntryView: View {
+struct CodeEntryView: View {
     @ObservedObject var service: UsageService
     @State private var code = ""
 
