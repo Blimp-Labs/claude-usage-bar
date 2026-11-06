@@ -65,12 +65,15 @@ class UsageHistoryService: ObservableObject {
     /// Pass nil whenever the signed-in account may change, until its profile identifies it.
     func setAccount(_ account: String?) {
         guard account != history.account else { return }
-        history.account = account
+        // Edited as a copy, so the published history changes once rather than per point.
+        var updated = history
+        updated.account = account
         if let account {
-            for i in history.dataPoints.indices where history.dataPoints[i].account == nil {
-                history.dataPoints[i].account = account
+            for i in updated.dataPoints.indices where updated.dataPoints[i].account == nil {
+                updated.dataPoints[i].account = account
             }
         }
+        history = updated
         isDirty = true
         // Saved now, or a crash could leave a relaunch recording the new account under the old one.
         flushToDisk()
