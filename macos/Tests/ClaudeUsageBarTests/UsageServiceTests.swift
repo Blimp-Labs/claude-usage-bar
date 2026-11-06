@@ -274,61 +274,24 @@ final class UsageServiceTests: XCTestCase {
     }
 
     func testSigningInAsAnotherAccountIgnoresTheOldAccountsLateProfile() async throws {
-        let store = try makeStore()
-        try store.save(
-            StoredCredentials(accessToken: "access-a", refreshToken: nil, expiresAt: nil, scopes: UsageService.defaultOAuthScopes)
-        )
-        MockURLProtocol.handler = { request in
-            switch (request.httpMethod, request.url?.path) {
-            case ("POST", "/v1/oauth/token"):
-                return try Self.httpResponse(url: request.url!, statusCode: 200, body: """
-                {"access_token": "access-b", "expires_in": 3600, "scope": "user:profile user:inference"}
-                """)
-            case ("GET", "/api/oauth/profile"):
-                let bearer = request.value(forHTTPHeaderField: "Authorization") ?? ""
-                let account = bearer.replacingOccurrences(of: "Bearer access-", with: "")
-                return try Self.httpResponse(url: request.url!, statusCode: 200, body: """
-                {"account": {"uuid": "\(account)", "email": "\(account)@example.com"}, "organization": {"uuid": "org"}}
-                """)
-            case ("GET", "/api/oauth/usage"):
-                return try Self.httpResponse(url: request.url!, statusCode: 200, body: "{}")
-            default:
-                XCTFail("Unexpected request: \(request)")
-                return try Self.httpResponse(url: request.url!, statusCode: 500)
-            }
-        }
-        let accountASent = expectation(description: "account A's profile request sent")
-        let releaseAccountA = DispatchSemaphore(value: 0)
-        MockURLProtocol.hold = (
-            matches: { request in
-                guard request.value(forHTTPHeaderField: "Authorization") == "Bearer access-a" else { return false }
-                accountASent.fulfill()
-                return true
-            },
-            until: releaseAccountA
-        )
-        var openedURL: URL?
-        let service = makeOAuthService(store: store, listener: false) { openedURL = $0 }
+        let (service, history) = try await signInAsBWhileHolding { await $0.fetchProfile() }
         defer { service.signOut() }
-        let history = UsageHistoryService(historyFileURL: store.directoryURL.appendingPathComponent("history.json"))
-        service.historyService = history
-
-        let accountAProfile = Task { await service.fetchProfile() }
-        await fulfillment(of: [accountASent], timeout: 5)
-        service.signOut()
-        await service.startOAuthFlow()
-        let state = try XCTUnwrap(queryItems(of: openedURL)["state"])
-        await service.submitOAuthCode("code-b#\(state)")
-        XCTAssertEqual(service.accountEmail, "b@example.com")
-
-        releaseAccountA.signal()
-        await accountAProfile.value
 
         XCTAssertEqual(service.accountEmail, "b@example.com")
         XCTAssertEqual(history.history.account, "org/b")
     }
 
     func testSigningInAsAnotherAccountIgnoresTheOldAccountsLateUsage() async throws {
+        let (service, history) = try await signInAsBWhileHolding { await $0.fetchUsage() }
+        defer { service.signOut() }
+
+        XCTAssertFalse(history.history.dataPoints.contains { $0.pct7d == 0.9 })
+    }
+
+    /// Holds account A's `request` until A has been signed out and B signed in, then lets its reply land.
+    private func signInAsBWhileHolding(
+        _ request: @escaping (UsageService) async -> Void
+    ) async throws -> (UsageService, UsageHistoryService) {
         let store = try makeStore()
         try store.save(
             StoredCredentials(accessToken: "access-a", refreshToken: nil, expiresAt: nil, scopes: UsageService.defaultOAuthScopes)
@@ -354,7 +317,7 @@ final class UsageServiceTests: XCTestCase {
                 return try Self.httpResponse(url: request.url!, statusCode: 500)
             }
         }
-        let accountASent = expectation(description: "account A's usage request sent")
+        let accountASent = expectation(description: "account A's request sent")
         let releaseAccountA = DispatchSemaphore(value: 0)
         MockURLProtocol.hold = (
             matches: { request in
@@ -366,21 +329,18 @@ final class UsageServiceTests: XCTestCase {
         )
         var openedURL: URL?
         let service = makeOAuthService(store: store, listener: false) { openedURL = $0 }
-        defer { service.signOut() }
         let history = UsageHistoryService(historyFileURL: store.directoryURL.appendingPathComponent("history.json"))
         service.historyService = history
 
-        let accountAUsage = Task { await service.fetchUsage() }
+        let accountA = Task { await request(service) }
         await fulfillment(of: [accountASent], timeout: 5)
         service.signOut()
         await service.startOAuthFlow()
         let state = try XCTUnwrap(queryItems(of: openedURL)["state"])
         await service.submitOAuthCode("code-b#\(state)")
-
         releaseAccountA.signal()
-        await accountAUsage.value
-
-        XCTAssertFalse(history.history.dataPoints.contains { $0.pct7d == 0.9 })
+        await accountA.value
+        return (service, history)
     }
 
     // MARK: - Transient vs permanent refresh failure
