@@ -155,7 +155,11 @@ class UsageService: ObservableObject {
         let minutes = Self.pollingOptions.contains(stored) ? stored : Self.defaultPollingMinutes
         self.pollingMinutes = minutes
         self.currentInterval = TimeInterval(minutes * 60)
-        accounts = (try? credentialsStore.loadAccounts(defaultScopes: Self.defaultOAuthScopes)) ?? []
+        do {
+            accounts = try credentialsStore.loadAccounts(defaultScopes: Self.defaultOAuthScopes)
+        } catch {
+            lastError = "Could not read saved accounts: \(error.localizedDescription)"
+        }
     }
 
     // MARK: - Polling
@@ -549,13 +553,17 @@ class UsageService: ObservableObject {
         }
         // Limits belong to the organization, so one login in two orgs is two accounts.
         let profileID = "\(organizationID)/\(accountID)"
-        try? updateAccounts { accounts in
-            guard let index = accounts.firstIndex(where: { $0.id == id }) else { return }
-            accounts[index].profileID = profileID
-            accounts[index].email = email
-            accounts[index].organizationName = organization["name"] as? String
-            // Signing in to an account again replaces its earlier sign-in.
-            accounts.removeAll { $0.id != id && $0.profileID == profileID }
+        do {
+            try updateAccounts { accounts in
+                guard let index = accounts.firstIndex(where: { $0.id == id }) else { return }
+                accounts[index].profileID = profileID
+                accounts[index].email = email
+                accounts[index].organizationName = organization["name"] as? String
+                // Signing in to an account again replaces its earlier sign-in.
+                accounts.removeAll { $0.id != id && $0.profileID == profileID }
+            }
+        } catch {
+            return
         }
         if isShown(id) { historyService?.setAccount(profileID) }
     }

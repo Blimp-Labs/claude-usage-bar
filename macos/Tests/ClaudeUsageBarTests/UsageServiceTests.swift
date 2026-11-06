@@ -503,6 +503,7 @@ final class UsageServiceTests: XCTestCase {
         defer { signOutAll(service) }
         try setPermissions(0o000, of: store.credentialsFileURL)
 
+        XCTAssertNotNil(makeOAuthService(store: store, listener: false).lastError)
         await service.fetchUsage()
         XCTAssertNotNil(service.lastError)
         service.lastError = nil

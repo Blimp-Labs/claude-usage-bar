@@ -66,7 +66,7 @@ class NotificationService: ObservableObject {
         var pct7d: Double?
         var pctExtra: Double?
     }
-    /// Per account, so switching accounts isn't taken for crossing a threshold.
+    /// Per account, so switching back to one doesn't repeat its alert.
     private var previous: [StoredAccount.ID: Percentages] = [:]
     private let delegate = NotificationDelegate()
     let isAvailable = supportsUserNotifications()
