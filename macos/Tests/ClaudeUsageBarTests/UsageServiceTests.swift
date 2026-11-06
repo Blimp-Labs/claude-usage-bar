@@ -328,6 +328,62 @@ final class UsageServiceTests: XCTestCase {
         XCTAssertEqual(history.history.account, "org/b")
     }
 
+    func testSigningInAsAnotherAccountIgnoresTheOldAccountsLateUsage() async throws {
+        let store = try makeStore()
+        try store.save(
+            StoredCredentials(accessToken: "access-a", refreshToken: nil, expiresAt: nil, scopes: UsageService.defaultOAuthScopes)
+        )
+        MockURLProtocol.handler = { request in
+            let bearer = request.value(forHTTPHeaderField: "Authorization") ?? ""
+            let account = bearer.replacingOccurrences(of: "Bearer access-", with: "")
+            switch (request.httpMethod, request.url?.path) {
+            case ("POST", "/v1/oauth/token"):
+                return try Self.httpResponse(url: request.url!, statusCode: 200, body: """
+                {"access_token": "access-b", "expires_in": 3600, "scope": "user:profile user:inference"}
+                """)
+            case ("GET", "/api/oauth/profile"):
+                return try Self.httpResponse(url: request.url!, statusCode: 200, body: """
+                {"account": {"uuid": "\(account)", "email": "\(account)@example.com"}, "organization": {"uuid": "org"}}
+                """)
+            case ("GET", "/api/oauth/usage"):
+                return try Self.httpResponse(url: request.url!, statusCode: 200, body: """
+                {"seven_day": {"utilization": \(account == "a" ? 90 : 10), "resets_at": "2026-03-15T18:00:00Z"}}
+                """)
+            default:
+                XCTFail("Unexpected request: \(request)")
+                return try Self.httpResponse(url: request.url!, statusCode: 500)
+            }
+        }
+        let accountASent = expectation(description: "account A's usage request sent")
+        let releaseAccountA = DispatchSemaphore(value: 0)
+        MockURLProtocol.hold = (
+            matches: { request in
+                guard request.value(forHTTPHeaderField: "Authorization") == "Bearer access-a" else { return false }
+                accountASent.fulfill()
+                return true
+            },
+            until: releaseAccountA
+        )
+        var openedURL: URL?
+        let service = makeOAuthService(store: store, listener: false) { openedURL = $0 }
+        defer { service.signOut() }
+        let history = UsageHistoryService(historyFileURL: store.directoryURL.appendingPathComponent("history.json"))
+        service.historyService = history
+
+        let accountAUsage = Task { await service.fetchUsage() }
+        await fulfillment(of: [accountASent], timeout: 5)
+        service.signOut()
+        await service.startOAuthFlow()
+        let state = try XCTUnwrap(queryItems(of: openedURL)["state"])
+        await service.submitOAuthCode("code-b#\(state)")
+
+        releaseAccountA.signal()
+        await accountAUsage.value
+
+        XCTAssertNotEqual(service.usage?.sevenDay?.utilization, 90)
+        XCTAssertFalse(history.history.dataPoints.contains { $0.pct7d == 0.9 })
+    }
+
     // MARK: - Transient vs permanent refresh failure
 
     func testServer500DuringRefreshStaysAuthenticated() async throws {

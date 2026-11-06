@@ -419,10 +419,14 @@ class UsageService: ObservableObject {
             // (It does still refresh against the real token endpoint, which
             // rotates the refresh token; harmless, but worth knowing.)
             let isLocalMock = Self.isLoopback(usageEndpoint)
-            guard let result = try await sendAuthorizedRequest(
+            let generation = accountGeneration
+            let result = try await sendAuthorizedRequest(
                 to: usageEndpoint,
                 expireSessionOnAuthFailure: !isLocalMock
-            ) else {
+            )
+            // The account changed while the request was in flight.
+            guard generation == accountGeneration else { return }
+            guard let result else {
                 // expireSession() normally reports this; skipping it must not
                 // leave stale numbers on screen with no indication why.
                 if isLocalMock, lastError == nil {
