@@ -2,24 +2,56 @@ import XCTest
 @testable import ClaudeUsageBar
 
 final class StoredCredentialsTests: XCTestCase {
-    func testStoreSavesAndLoadsCredentialBundle() throws {
+    func testStoreSavesAndLoadsAccounts() throws {
         let store = try makeStore()
-        let credentials = StoredCredentials(
-            accessToken: "access-token",
-            refreshToken: "refresh-token",
-            expiresAt: Date(timeIntervalSince1970: 1_741_194_400),
-            scopes: ["user:profile", "user:inference"]
-        )
+        let accounts = [
+            StoredAccount(
+                credentials: StoredCredentials(
+                    accessToken: "access-token",
+                    refreshToken: "refresh-token",
+                    expiresAt: Date(timeIntervalSince1970: 1_741_194_400),
+                    scopes: ["user:profile", "user:inference"]
+                ),
+                profileID: "org/a",
+                email: "a@example.com",
+                organizationName: "Org"
+            ),
+            StoredAccount(
+                credentials: StoredCredentials(accessToken: "b", refreshToken: nil, expiresAt: nil, scopes: [])
+            ),
+        ]
 
-        try store.save(credentials)
+        try store.save(accounts)
 
-        let loaded = try XCTUnwrap(store.load(defaultScopes: []))
-        XCTAssertEqual(loaded, credentials)
-
+        XCTAssertEqual(try store.loadAccounts(defaultScopes: []), accounts)
         let filePermissions = try permissions(for: store.credentialsFileURL)
         let directoryPermissions = try permissions(for: store.directoryURL)
         XCTAssertEqual(filePermissions, 0o600)
         XCTAssertEqual(directoryPermissions, 0o700)
+
+        try store.save([])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.credentialsFileURL.path))
+    }
+
+    func testStoreMigratesASingleAccountsCredentials() throws {
+        let store = try makeStore()
+        try Data("""
+        {"accessToken": "old-access", "refreshToken": "old-refresh", "scopes": ["user:profile"]}
+        """.utf8).write(to: store.credentialsFileURL)
+
+        let migrated = try store.loadAccounts(defaultScopes: [])
+
+        XCTAssertEqual(migrated.map(\.credentials.accessToken), ["old-access"])
+        XCTAssertEqual(try store.loadAccounts(defaultScopes: []), migrated)
+    }
+
+    func testStoreThrowsInsteadOfLoadingAFileItCantReadAsNoAccounts() throws {
+        let store = try makeStore()
+        try Data("not json".utf8).write(to: store.credentialsFileURL)
+        XCTAssertThrowsError(try store.loadAccounts(defaultScopes: []))
+
+        try setPermissions(0o000, of: store.credentialsFileURL)
+        XCTAssertThrowsError(try store.loadAccounts(defaultScopes: []))
     }
 
     func testStoreLoadsLegacyRawTokenFile() throws {
@@ -31,7 +63,7 @@ final class StoredCredentialsTests: XCTestCase {
         )
 
         let loaded = try XCTUnwrap(
-            store.load(defaultScopes: UsageService.defaultOAuthScopes)
+            try store.loadAccounts(defaultScopes: UsageService.defaultOAuthScopes).first?.credentials
         )
 
         XCTAssertEqual(loaded.accessToken, "legacy-access-token")

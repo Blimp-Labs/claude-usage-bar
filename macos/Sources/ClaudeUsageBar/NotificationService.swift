@@ -61,9 +61,13 @@ class NotificationService: ObservableObject {
     @Published private(set) var threshold7d: Int
     @Published private(set) var thresholdExtra: Int
 
-    private var previousPct5h: Double?
-    private var previousPct7d: Double?
-    private var previousPctExtra: Double?
+    private struct Percentages {
+        var pct5h: Double?
+        var pct7d: Double?
+        var pctExtra: Double?
+    }
+    /// Per account, so switching back to one doesn't repeat its alert.
+    private var previous: [String: Percentages] = [:]
     private let delegate = NotificationDelegate()
     let isAvailable = supportsUserNotifications()
 
@@ -79,21 +83,21 @@ class NotificationService: ObservableObject {
     func setThreshold5h(_ value: Int) {
         threshold5h = clamp(value)
         UserDefaults.standard.set(threshold5h, forKey: "notificationThreshold5h")
-        previousPct5h = nil
+        for account in previous.keys { previous[account]?.pct5h = nil }
         if threshold5h > 0 { requestPermission() }
     }
 
     func setThreshold7d(_ value: Int) {
         threshold7d = clamp(value)
         UserDefaults.standard.set(threshold7d, forKey: "notificationThreshold7d")
-        previousPct7d = nil
+        for account in previous.keys { previous[account]?.pct7d = nil }
         if threshold7d > 0 { requestPermission() }
     }
 
     func setThresholdExtra(_ value: Int) {
         thresholdExtra = clamp(value)
         UserDefaults.standard.set(thresholdExtra, forKey: "notificationThresholdExtra")
-        previousPctExtra = nil
+        for account in previous.keys { previous[account]?.pctExtra = nil }
         if thresholdExtra > 0 { requestPermission() }
     }
 
@@ -102,28 +106,24 @@ class NotificationService: ObservableObject {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
-    func checkAndNotify(pct5h: Double, pct7d: Double, pctExtra: Double) {
+    @discardableResult
+    func checkAndNotify(
+        pct5h: Double, pct7d: Double, pctExtra: Double, account: String
+    ) -> [ThresholdAlert] {
         let current5h = pct5h * 100
         let current7d = pct7d * 100
         let currentExtra = pctExtra * 100
 
-        let prev5h = previousPct5h ?? 0
-        let prev7d = previousPct7d ?? 0
-        let prevExtra = previousPctExtra ?? 0
-
-        defer {
-            previousPct5h = current5h
-            previousPct7d = current7d
-            previousPctExtra = currentExtra
-        }
+        let last = previous[account] ?? Percentages()
+        previous[account] = Percentages(pct5h: current5h, pct7d: current7d, pctExtra: currentExtra)
 
         let alerts = crossedThresholds(
             threshold5h: threshold5h,
             threshold7d: threshold7d,
             thresholdExtra: thresholdExtra,
-            previous5h: prev5h,
-            previous7d: prev7d,
-            previousExtra: prevExtra,
+            previous5h: last.pct5h ?? 0,
+            previous7d: last.pct7d ?? 0,
+            previousExtra: last.pctExtra ?? 0,
             current5h: current5h,
             current7d: current7d,
             currentExtra: currentExtra
@@ -132,6 +132,7 @@ class NotificationService: ObservableObject {
         for alert in alerts {
             sendNotification(window: alert.window, pct: alert.pct)
         }
+        return alerts
     }
 
     private func sendNotification(window: String, pct: Int) {

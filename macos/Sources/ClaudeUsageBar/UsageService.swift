@@ -7,15 +7,21 @@ class UsageService: ObservableObject {
     @Published var usage: UsageResponse?
     @Published var lastError: String?
     @Published var lastUpdated: Date?
-    @Published var isAuthenticated = false
+    /// Most recently used first; the first is the one shown.
+    @Published private(set) var accounts: [StoredAccount] = []
     @Published private(set) var isAwaitingCode = false
     @Published private(set) var isWaitingForBrowser = false
-    @Published private(set) var accountEmail: String?
     /// False when the server reports no 5-hour window (Ultra plans). Remembered
     /// so the menu bar icon has the right shape before the first fetch.
     @Published private(set) var hasFiveHourWindow: Bool
 
-    var historyService: UsageHistoryService?
+    var isAuthenticated: Bool { !accounts.isEmpty }
+    var accountEmail: String? { accounts.first?.email }
+
+    var historyService: UsageHistoryService? {
+        // The saved accounts decide which history to chart, should history.json disagree after a crash.
+        didSet { historyService?.setAccount(accounts.first?.profileID) }
+    }
     var notificationService: NotificationService?
 
     private var timer: Timer?
@@ -35,10 +41,7 @@ class UsageService: ObservableObject {
         case transientFailure
     }
 
-    private var refreshTask: Task<RefreshResult, Never>?
-    /// Bumped whenever the signed-in account may change, so a profile reply for
-    /// an earlier account can't overwrite the current one.
-    private var accountGeneration = 0
+    private var refreshTasks: [StoredAccount.ID: Task<RefreshResult, Never>] = [:]
 
     static let defaultPollingMinutes = 30
     static let pollingOptions = [5, 15, 30, 60]
@@ -152,7 +155,15 @@ class UsageService: ObservableObject {
         let minutes = Self.pollingOptions.contains(stored) ? stored : Self.defaultPollingMinutes
         self.pollingMinutes = minutes
         self.currentInterval = TimeInterval(minutes * 60)
-        isAuthenticated = loadCredentials() != nil
+        do {
+            accounts = try credentialsStore.loadAccounts(defaultScopes: Self.defaultOAuthScopes)
+        } catch {
+            lastError = Self.unreadableAccountsMessage(error)
+        }
+    }
+
+    private static func unreadableAccountsMessage(_ error: Error) -> String {
+        "Could not read saved accounts (\(error.localizedDescription)). Delete ~/.config/claude-usage-bar/credentials.json and sign in again."
     }
 
     // MARK: - Polling
@@ -163,11 +174,11 @@ class UsageService: ObservableObject {
         scheduleTimer()
     }
 
-    /// Retries the profile too, so a lookup that failed at launch doesn't leave
-    /// Settings without an email until the next sign-in.
+    /// Looks the profile up until it loads, for accounts saved by earlier
+    /// versions or whose lookup failed at sign-in.
     private func poll() async {
+        if accounts.first?.profileID == nil { await fetchProfile() }
         await fetchUsage()
-        if accountEmail == nil { await fetchProfile() }
     }
 
     private func scheduleTimer() {
@@ -343,14 +354,11 @@ class UsageService: ObservableObject {
             }
 
             do {
-                try saveCredentials(credentials)
+                try updateAccounts { $0.insert(StoredAccount(credentials: credentials), at: 0) }
             } catch {
                 lastError = "Failed to save credentials: \(error.localizedDescription)"
                 return false
             }
-            isAuthenticated = true
-            forgetAccount()
-            lastError = nil
             endOAuthFlow()
 
             await fetchProfile()
@@ -377,17 +385,76 @@ class UsageService: ObservableObject {
         return components.url!
     }
 
+    // MARK: - Accounts
+
+    func switchAccount(to id: StoredAccount.ID) {
+        guard !isShown(id) else { return }
+        do {
+            try updateAccounts { accounts in
+                guard let index = accounts.firstIndex(where: { $0.id == id }) else { return }
+                accounts.insert(accounts.remove(at: index), at: 0)
+            }
+        } catch {
+            lastError = "Could not switch accounts: \(error.localizedDescription)"
+            return
+        }
+        startPolling()
+    }
+
+    /// Moves to the account used last, if another is signed in.
     func signOut() {
-        deleteCredentials()
-        isAuthenticated = false
+        guard let id = accounts.first?.id else { return }
+        removeAccount(id)
+    }
+
+    private func removeAccount(_ id: StoredAccount.ID) {
+        refreshTasks.removeValue(forKey: id)?.cancel()
+        let wasShown = isShown(id)
+        do {
+            try updateAccounts { $0.removeAll { $0.id == id } }
+        } catch {
+            lastError = "Could not sign out: \(error.localizedDescription)"
+            return
+        }
+        if wasShown { startPolling() }
+    }
+
+    private func isShown(_ id: StoredAccount.ID) -> Bool {
+        accounts.first?.id == id
+    }
+
+    /// Edits the accounts as saved, so tokens another copy of the app refreshed aren't lost.
+    private func updateAccounts(_ change: (inout [StoredAccount]) -> Void) throws {
+        var updated = try loadSavedAccounts()
+        change(&updated)
+        try credentialsStore.save(updated)
+        show(updated)
+    }
+
+    private func show(_ updated: [StoredAccount]) {
+        let shown = accounts.first?.id
+        accounts = updated
+        guard accounts.first?.id != shown else { return }
         usage = nil
         lastUpdated = nil
-        forgetAccount()
-        timer?.invalidate()
-        timer = nil
-        refreshTask?.cancel()
-        refreshTask = nil
         lastError = nil
+        historyService?.setAccount(accounts.first?.profileID)
+        if accounts.isEmpty {
+            timer?.invalidate()
+            timer = nil
+        } else if currentInterval != baseInterval {
+            // The backoff was for the previous account.
+            currentInterval = baseInterval
+            if timer != nil { scheduleTimer() }
+        }
+    }
+
+    private func loadSavedAccounts() throws -> [StoredAccount] {
+        try credentialsStore.loadAccounts(defaultScopes: Self.defaultOAuthScopes)
+    }
+
+    private func storedCredentials(for id: StoredAccount.ID) -> StoredCredentials? {
+        (try? loadSavedAccounts())?.first { $0.id == id }?.credentials
     }
 
     // MARK: - PKCE Helpers
@@ -406,13 +473,11 @@ class UsageService: ObservableObject {
     // MARK: - API Fetch
 
     func fetchUsage() async {
-        guard loadCredentials() != nil else {
+        guard let id = accounts.first?.id else {
             lastError = "Not signed in"
-            isAuthenticated = false
             return
         }
 
-        let generation = accountGeneration
         do {
             // A local mock returning 401 must not delete the user's real
             // credentials — the token endpoint is not overridable, so the
@@ -422,10 +487,11 @@ class UsageService: ObservableObject {
             let isLocalMock = Self.isLoopback(usageEndpoint)
             let result = try await sendAuthorizedRequest(
                 to: usageEndpoint,
+                for: id,
                 expireSessionOnAuthFailure: !isLocalMock
             )
-            // The account changed while the request was in flight.
-            guard generation == accountGeneration else { return }
+            // Another account was shown while this one's request was in flight.
+            guard isShown(id) else { return }
             guard let result else {
                 // expireSession() normally reports this; skipping it must not
                 // leave stale numbers on screen with no indication why.
@@ -457,25 +523,33 @@ class UsageService: ObservableObject {
             defaults.set(hasFiveHourWindow, forKey: Self.hasFiveHourWindowKey)
             lastError = nil
             lastUpdated = Date()
-            historyService?.recordDataPoint(pct5h: pct5h, pct7d: pct7d)
-            notificationService?.checkAndNotify(pct5h: pct5h, pct7d: pct7d, pctExtra: pctExtra)
+            // Unfiled points go to the next account identified, which may not be this one.
+            if accounts.first?.profileID != nil {
+                historyService?.recordDataPoint(pct5h: pct5h, pct7d: pct7d)
+            }
+            // By profile, so signing in to the account again doesn't repeat its alerts.
+            notificationService?.checkAndNotify(
+                pct5h: pct5h, pct7d: pct7d, pctExtra: pctExtra,
+                account: accounts.first?.profileID ?? id.uuidString
+            )
             if currentInterval != baseInterval {
                 currentInterval = baseInterval
                 scheduleTimer()
             }
         } catch {
-            if generation == accountGeneration { lastError = error.localizedDescription }
+            if isShown(id) { lastError = error.localizedDescription }
         }
     }
 
     // MARK: - Profile
 
     func fetchProfile() async {
-        let generation = accountGeneration
-        guard let result = try? await sendAuthorizedRequest(
-            to: profileEndpoint,
-            expireSessionOnAuthFailure: false
-        ) else {
+        guard let id = accounts.first?.id,
+              let result = try? await sendAuthorizedRequest(
+                to: profileEndpoint,
+                for: id,
+                expireSessionOnAuthFailure: false
+              ) else {
             return
         }
         let (data, http) = result
@@ -484,57 +558,58 @@ class UsageService: ObservableObject {
               let account = json["account"] as? [String: Any],
               let accountID = account["uuid"] as? String,
               let email = account["email"] as? String, !email.isEmpty,
-              let organizationID = (json["organization"] as? [String: Any])?["uuid"] as? String,
-              generation == accountGeneration else {
+              let organization = json["organization"] as? [String: Any],
+              let organizationID = organization["uuid"] as? String else {
             return
         }
-        accountEmail = email
-        // Limits belong to the organization, so one login in two orgs keeps two histories.
-        historyService?.setAccount("\(organizationID)/\(accountID)")
-    }
-
-    private func forgetAccount() {
-        accountEmail = nil
-        accountGeneration += 1
-        historyService?.setAccount(nil)
-    }
-
-    // MARK: - Credential storage
-
-    private func saveCredentials(_ credentials: StoredCredentials) throws {
-        try credentialsStore.save(credentials)
-    }
-
-    private func loadCredentials() -> StoredCredentials? {
-        credentialsStore.load(defaultScopes: Self.defaultOAuthScopes)
-    }
-
-    private func deleteCredentials() {
-        credentialsStore.delete()
+        // Limits belong to the organization, so one login in two orgs is two accounts.
+        let profileID = "\(organizationID)/\(accountID)"
+        let shown = accounts.first?.id
+        do {
+            try updateAccounts { accounts in
+                guard let index = accounts.firstIndex(where: { $0.id == id }) else { return }
+                accounts[index].profileID = profileID
+                accounts[index].email = email
+                accounts[index].organizationName = organization["name"] as? String
+                // Signing in to an account again replaces its earlier sign-in.
+                accounts.removeAll { $0.id != id && $0.profileID == profileID }
+            }
+        } catch {
+            return
+        }
+        // The shown account was an earlier sign-in to this one and was just removed.
+        if accounts.first?.id != shown { startPolling() }
+        if isShown(id) { historyService?.setAccount(profileID) }
     }
 
     // MARK: - Authorized requests
 
     private func sendAuthorizedRequest(
         to url: URL,
+        for id: StoredAccount.ID,
         expireSessionOnAuthFailure: Bool = true
     ) async throws -> (Data, HTTPURLResponse)? {
-        guard let initialCredentials = loadCredentials() else {
-            lastError = "Not signed in"
-            isAuthenticated = false
+        guard let initialCredentials = storedCredentials(for: id) else {
+            do {
+                // Removed from the file, for example by another copy of the app signing out.
+                show(try loadSavedAccounts())
+                if !isShown(id) { startPolling() }
+            } catch {
+                lastError = Self.unreadableAccountsMessage(error)
+            }
             return nil
         }
 
         if initialCredentials.needsRefresh() {
-            let refreshResult = await refreshCredentials(force: true)
+            let refreshResult = await refreshCredentials(for: id, force: true)
             if refreshResult != .success, initialCredentials.isExpired() {
                 switch refreshResult {
                 case .permanentFailure:
                     if expireSessionOnAuthFailure {
-                        expireSession()
+                        expireSession(id)
                     }
                 case .transientFailure:
-                    lastError = "Token refresh failed — will retry"
+                    if isShown(id) { lastError = "Token refresh failed — will retry" }
                 case .success:
                     break
                 }
@@ -542,7 +617,7 @@ class UsageService: ObservableObject {
             }
         }
 
-        let activeCredentials = loadCredentials() ?? initialCredentials
+        let activeCredentials = storedCredentials(for: id) ?? initialCredentials
 
         var result = try await performAuthorizedRequest(
             token: activeCredentials.accessToken,
@@ -553,12 +628,12 @@ class UsageService: ObservableObject {
             return result
         }
 
-        let refreshResult = await refreshCredentials(force: true)
+        let refreshResult = await refreshCredentials(for: id, force: true)
         switch refreshResult {
         case .success:
-            guard let refreshedCredentials = loadCredentials() else {
+            guard let refreshedCredentials = storedCredentials(for: id) else {
                 if expireSessionOnAuthFailure {
-                    expireSession()
+                    expireSession(id)
                 }
                 return nil
             }
@@ -570,7 +645,7 @@ class UsageService: ObservableObject {
 
             if result.1.statusCode == 401 {
                 if expireSessionOnAuthFailure {
-                    expireSession()
+                    expireSession(id)
                 }
                 return nil
             }
@@ -579,12 +654,12 @@ class UsageService: ObservableObject {
 
         case .permanentFailure:
             if expireSessionOnAuthFailure {
-                expireSession()
+                expireSession(id)
             }
             return nil
 
         case .transientFailure:
-            lastError = "Token refresh failed — will retry"
+            if isShown(id) { lastError = "Token refresh failed — will retry" }
             return nil
         }
     }
@@ -604,23 +679,23 @@ class UsageService: ObservableObject {
         return (data, http)
     }
 
-    private func refreshCredentials(force: Bool) async -> RefreshResult {
-        if let refreshTask {
+    private func refreshCredentials(for id: StoredAccount.ID, force: Bool) async -> RefreshResult {
+        if let refreshTask = refreshTasks[id] {
             return await refreshTask.value
         }
 
         let task = Task { [weak self] in
             guard let self else { return RefreshResult.permanentFailure }
-            return await self.performRefresh(force: force)
+            return await self.performRefresh(for: id, force: force)
         }
-        refreshTask = task
+        refreshTasks[id] = task
         let result = await task.value
-        refreshTask = nil
+        refreshTasks[id] = nil
         return result
     }
 
-    private func performRefresh(force: Bool) async -> RefreshResult {
-        guard let currentCredentials = loadCredentials(),
+    private func performRefresh(for id: StoredAccount.ID, force: Bool) async -> RefreshResult {
+        guard let currentCredentials = storedCredentials(for: id),
               let refreshToken = currentCredentials.refreshToken,
               refreshToken.isEmpty == false else {
             return .permanentFailure
@@ -672,18 +747,24 @@ class UsageService: ObservableObject {
             return .transientFailure
         }
 
+        // Saved even if another account is shown by now: the old refresh token no longer works.
+        func save() throws {
+            try updateAccounts { accounts in
+                guard let index = accounts.firstIndex(where: { $0.id == id }) else { return }
+                accounts[index].credentials = updatedCredentials
+            }
+        }
         do {
-            try saveCredentials(updatedCredentials)
+            try save()
         } catch {
             try? await Task.sleep(nanoseconds: 100_000_000)
             do {
-                try saveCredentials(updatedCredentials)
+                try save()
             } catch {
                 return .transientFailure
             }
         }
 
-        isAuthenticated = true
         return .success
     }
 
@@ -727,17 +808,12 @@ class UsageService: ObservableObject {
         return Date().addingTimeInterval(seconds)
     }
 
-    private func expireSession() {
-        deleteCredentials()
-        isAuthenticated = false
-        usage = nil
-        lastUpdated = nil
-        forgetAccount()
-        timer?.invalidate()
-        timer = nil
-        refreshTask?.cancel()
-        refreshTask = nil
-        lastError = "Session expired — please sign in again"
+    private func expireSession(_ id: StoredAccount.ID) {
+        let wasShown = isShown(id)
+        removeAccount(id)
+        if wasShown && !isAuthenticated {
+            lastError = "Session expired — please sign in again"
+        }
     }
 }
 
