@@ -527,7 +527,11 @@ class UsageService: ObservableObject {
             if accounts.first?.profileID != nil {
                 historyService?.recordDataPoint(pct5h: pct5h, pct7d: pct7d)
             }
-            notificationService?.checkAndNotify(pct5h: pct5h, pct7d: pct7d, pctExtra: pctExtra, account: id)
+            // By profile, so signing in to the account again doesn't repeat its alerts.
+            notificationService?.checkAndNotify(
+                pct5h: pct5h, pct7d: pct7d, pctExtra: pctExtra,
+                account: accounts.first?.profileID ?? id.uuidString
+            )
             if currentInterval != baseInterval {
                 currentInterval = baseInterval
                 scheduleTimer()

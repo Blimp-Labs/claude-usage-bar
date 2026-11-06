@@ -67,7 +67,7 @@ class NotificationService: ObservableObject {
         var pctExtra: Double?
     }
     /// Per account, so switching back to one doesn't repeat its alert.
-    private var previous: [StoredAccount.ID: Percentages] = [:]
+    private var previous: [String: Percentages] = [:]
     private let delegate = NotificationDelegate()
     let isAvailable = supportsUserNotifications()
 
@@ -108,7 +108,7 @@ class NotificationService: ObservableObject {
 
     @discardableResult
     func checkAndNotify(
-        pct5h: Double, pct7d: Double, pctExtra: Double, account: StoredAccount.ID
+        pct5h: Double, pct7d: Double, pctExtra: Double, account: String
     ) -> [ThresholdAlert] {
         let current5h = pct5h * 100
         let current7d = pct7d * 100

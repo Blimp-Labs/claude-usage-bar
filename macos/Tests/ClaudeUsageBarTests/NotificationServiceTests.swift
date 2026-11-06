@@ -84,11 +84,10 @@ final class NotificationServiceTests: XCTestCase {
         addTeardownBlock { UserDefaults.standard.set(saved, forKey: "notificationThreshold7d") }
         let service = NotificationService()
         service.setThreshold7d(80)
-        let (a, b) = (UUID(), UUID())
 
-        XCTAssertEqual(service.checkAndNotify(pct5h: 0, pct7d: 0.9, pctExtra: 0, account: a).count, 1)
-        XCTAssertTrue(service.checkAndNotify(pct5h: 0, pct7d: 0.1, pctExtra: 0, account: b).isEmpty)
-        XCTAssertTrue(service.checkAndNotify(pct5h: 0, pct7d: 0.9, pctExtra: 0, account: a).isEmpty)
+        XCTAssertEqual(service.checkAndNotify(pct5h: 0, pct7d: 0.9, pctExtra: 0, account: "a").count, 1)
+        XCTAssertTrue(service.checkAndNotify(pct5h: 0, pct7d: 0.1, pctExtra: 0, account: "b").isEmpty)
+        XCTAssertTrue(service.checkAndNotify(pct5h: 0, pct7d: 0.9, pctExtra: 0, account: "a").isEmpty)
     }
 
     func testFirstPollFiresWhenAlreadyAboveThreshold() {
