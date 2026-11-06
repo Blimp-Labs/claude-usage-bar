@@ -412,6 +412,7 @@ class UsageService: ObservableObject {
             return
         }
 
+        let generation = accountGeneration
         do {
             // A local mock returning 401 must not delete the user's real
             // credentials — the token endpoint is not overridable, so the
@@ -419,7 +420,6 @@ class UsageService: ObservableObject {
             // (It does still refresh against the real token endpoint, which
             // rotates the refresh token; harmless, but worth knowing.)
             let isLocalMock = Self.isLoopback(usageEndpoint)
-            let generation = accountGeneration
             let result = try await sendAuthorizedRequest(
                 to: usageEndpoint,
                 expireSessionOnAuthFailure: !isLocalMock
@@ -464,7 +464,7 @@ class UsageService: ObservableObject {
                 scheduleTimer()
             }
         } catch {
-            lastError = error.localizedDescription
+            if generation == accountGeneration { lastError = error.localizedDescription }
         }
     }
 
