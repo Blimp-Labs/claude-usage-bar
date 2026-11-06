@@ -63,7 +63,8 @@ struct StoredCredentialsStore {
     }
 
     /// Most recently used first. Throws when the file is there but can't be read,
-    /// so a failed read is never saved back as no accounts.
+    /// so a failed read is never saved back as no accounts. A file it can read but
+    /// not decode counts as none, so signing in can replace it.
     func loadAccounts(defaultScopes: [String]) throws -> [StoredAccount] {
         var data: Data?
         if fileManager.fileExists(atPath: credentialsFileURL.path) {

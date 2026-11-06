@@ -495,19 +495,44 @@ final class UsageServiceTests: XCTestCase {
         XCTAssertEqual(service.accounts, [b])
     }
 
-    func testSigningOutDoesNotSaveOverAnUnreadableFile() throws {
+    func testAnUnreadableFileIsReportedAndNotSavedOver() async throws {
         let store = try makeStore()
         let (a, b) = (Self.account("a"), Self.account("b"))
         try store.save([a, b])
         let service = makeOAuthService(store: store, listener: false)
         defer { signOutAll(service) }
+        try setPermissions(0o000, of: store.credentialsFileURL)
 
-        let path = store.credentialsFileURL.path
-        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: path)
+        await service.fetchUsage()
+        XCTAssertNotNil(service.lastError)
+        service.lastError = nil
         service.signOut()
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
 
-        XCTAssertEqual(try store.loadAccounts(defaultScopes: []), [a, b])
+        XCTAssertNotNil(service.lastError)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.credentialsFileURL.path))
+        XCTAssertEqual(service.accounts, [a, b])
+    }
+
+    func testUsageForAnAccountWithoutAProfileIsNotFiledUnderAnother() async throws {
+        let store = try makeStore()
+        let a = Self.account("a")
+        var b = Self.account("b")
+        b.profileID = nil
+        try store.save([a, b])
+        MockURLProtocol.handler = { request in
+            guard request.url?.path == "/api/oauth/profile" else { return try Self.usageByAccountHandler(request) }
+            return try Self.httpResponse(url: request.url!, statusCode: 500)
+        }
+        let service = makeOAuthService(store: store, listener: false)
+        defer { signOutAll(service) }
+        let history = UsageHistoryService(historyFileURL: store.directoryURL.appendingPathComponent("history.json"))
+        service.historyService = history
+
+        service.switchAccount(to: b.id)
+        await service.fetchUsage()
+        service.switchAccount(to: a.id)
+
+        XCTAssertFalse(history.history.dataPoints.contains { $0.pct7d == Self.utilization["b"]! / 100 })
     }
 
     private static func account(_ name: String) -> StoredAccount {

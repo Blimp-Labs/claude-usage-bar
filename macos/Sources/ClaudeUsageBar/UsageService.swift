@@ -166,8 +166,8 @@ class UsageService: ObservableObject {
     /// Looks the profile up until it loads, for accounts saved by earlier
     /// versions or whose lookup failed at sign-in.
     private func poll() async {
-        await fetchUsage()
         if accounts.first?.profileID == nil { await fetchProfile() }
+        await fetchUsage()
     }
 
     private func scheduleTimer() {
@@ -378,9 +378,14 @@ class UsageService: ObservableObject {
 
     func switchAccount(to id: StoredAccount.ID) {
         guard !isShown(id) else { return }
-        try? updateAccounts { accounts in
-            guard let index = accounts.firstIndex(where: { $0.id == id }) else { return }
-            accounts.insert(accounts.remove(at: index), at: 0)
+        do {
+            try updateAccounts { accounts in
+                guard let index = accounts.firstIndex(where: { $0.id == id }) else { return }
+                accounts.insert(accounts.remove(at: index), at: 0)
+            }
+        } catch {
+            lastError = "Could not switch accounts: \(error.localizedDescription)"
+            return
         }
         startPolling()
     }
@@ -394,7 +399,12 @@ class UsageService: ObservableObject {
     private func removeAccount(_ id: StoredAccount.ID) {
         refreshTasks.removeValue(forKey: id)?.cancel()
         let wasShown = isShown(id)
-        try? updateAccounts { $0.removeAll { $0.id == id } }
+        do {
+            try updateAccounts { $0.removeAll { $0.id == id } }
+        } catch {
+            lastError = "Could not sign out: \(error.localizedDescription)"
+            return
+        }
         if wasShown { startPolling() }
     }
 
@@ -499,7 +509,10 @@ class UsageService: ObservableObject {
             defaults.set(hasFiveHourWindow, forKey: Self.hasFiveHourWindowKey)
             lastError = nil
             lastUpdated = Date()
-            historyService?.recordDataPoint(pct5h: pct5h, pct7d: pct7d)
+            // Unfiled points go to the next account identified, which may not be this one.
+            if accounts.first?.profileID != nil {
+                historyService?.recordDataPoint(pct5h: pct5h, pct7d: pct7d)
+            }
             notificationService?.checkAndNotify(pct5h: pct5h, pct7d: pct7d, pctExtra: pctExtra, account: id)
             if currentInterval != baseInterval {
                 currentInterval = baseInterval
@@ -552,10 +565,12 @@ class UsageService: ObservableObject {
         expireSessionOnAuthFailure: Bool = true
     ) async throws -> (Data, HTTPURLResponse)? {
         guard let initialCredentials = storedCredentials(for: id) else {
-            // Removed from the file, for example by another copy of the app signing out.
-            if let saved = try? loadSavedAccounts() {
-                show(saved)
+            do {
+                // Removed from the file, for example by another copy of the app signing out.
+                show(try loadSavedAccounts())
                 if !isShown(id) { startPolling() }
+            } catch {
+                lastError = "Could not read saved accounts: \(error.localizedDescription)"
             }
             return nil
         }

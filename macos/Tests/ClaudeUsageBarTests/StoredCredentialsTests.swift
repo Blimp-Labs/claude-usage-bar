@@ -133,15 +133,6 @@ final class StoredCredentialsTests: XCTestCase {
         return StoredCredentialsStore(directoryURL: directory)
     }
 
-    /// Restores the original mode after the test.
-    private func setPermissions(_ mode: Int, of url: URL) throws {
-        let original = try permissions(for: url)
-        try FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: url.path)
-        addTeardownBlock {
-            try? FileManager.default.setAttributes([.posixPermissions: original], ofItemAtPath: url.path)
-        }
-    }
-
     private func permissions(for url: URL) throws -> Int {
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
         return attributes[.posixPermissions] as? Int ?? -1

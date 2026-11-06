@@ -1,3 +1,4 @@
+import XCTest
 @testable import ClaudeUsageBar
 
 extension StoredCredentialsStore {
@@ -14,5 +15,16 @@ extension StoredCredentialsStore {
 
     func load(defaultScopes: [String]) -> StoredCredentials? {
         (try? loadAccounts(defaultScopes: defaultScopes))?.first?.credentials
+    }
+}
+
+extension XCTestCase {
+    /// Restores the original mode after the test.
+    func setPermissions(_ mode: Int, of url: URL) throws {
+        let original = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions]
+        try FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: url.path)
+        addTeardownBlock {
+            try? FileManager.default.setAttributes([.posixPermissions: original as Any], ofItemAtPath: url.path)
+        }
     }
 }
