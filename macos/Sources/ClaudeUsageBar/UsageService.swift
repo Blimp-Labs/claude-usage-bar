@@ -152,7 +152,7 @@ class UsageService: ObservableObject {
         let minutes = Self.pollingOptions.contains(stored) ? stored : Self.defaultPollingMinutes
         self.pollingMinutes = minutes
         self.currentInterval = TimeInterval(minutes * 60)
-        accounts = credentialsStore.loadAccounts(defaultScopes: Self.defaultOAuthScopes)
+        accounts = (try? credentialsStore.loadAccounts(defaultScopes: Self.defaultOAuthScopes)) ?? []
     }
 
     // MARK: - Polling
@@ -404,18 +404,20 @@ class UsageService: ObservableObject {
 
     /// Edits the accounts as saved, so tokens another copy of the app refreshed aren't lost.
     private func updateAccounts(_ change: (inout [StoredAccount]) -> Void) throws {
-        var updated = credentialsStore.loadAccounts(defaultScopes: Self.defaultOAuthScopes)
+        var updated = try loadSavedAccounts()
         change(&updated)
         try credentialsStore.save(updated)
-        let shown = accounts.first?.id
-        accounts = updated
-        if accounts.first?.id != shown { shownAccountDidChange() }
+        show(updated)
     }
 
-    private func shownAccountDidChange() {
+    private func show(_ updated: [StoredAccount]) {
+        let shown = accounts.first?.id
+        accounts = updated
+        guard accounts.first?.id != shown else { return }
         usage = nil
         lastUpdated = nil
         lastError = nil
+        currentInterval = baseInterval
         historyService?.setAccount(accounts.first?.profileID)
         if accounts.isEmpty {
             timer?.invalidate()
@@ -423,9 +425,12 @@ class UsageService: ObservableObject {
         }
     }
 
+    private func loadSavedAccounts() throws -> [StoredAccount] {
+        try credentialsStore.loadAccounts(defaultScopes: Self.defaultOAuthScopes)
+    }
+
     private func storedCredentials(for id: StoredAccount.ID) -> StoredCredentials? {
-        credentialsStore.loadAccounts(defaultScopes: Self.defaultOAuthScopes)
-            .first { $0.id == id }?.credentials
+        (try? loadSavedAccounts())?.first { $0.id == id }?.credentials
     }
 
     // MARK: - PKCE Helpers
@@ -495,7 +500,7 @@ class UsageService: ObservableObject {
             lastError = nil
             lastUpdated = Date()
             historyService?.recordDataPoint(pct5h: pct5h, pct7d: pct7d)
-            notificationService?.checkAndNotify(pct5h: pct5h, pct7d: pct7d, pctExtra: pctExtra)
+            notificationService?.checkAndNotify(pct5h: pct5h, pct7d: pct7d, pctExtra: pctExtra, account: id)
             if currentInterval != baseInterval {
                 currentInterval = baseInterval
                 scheduleTimer()
@@ -546,7 +551,14 @@ class UsageService: ObservableObject {
         for id: StoredAccount.ID,
         expireSessionOnAuthFailure: Bool = true
     ) async throws -> (Data, HTTPURLResponse)? {
-        guard let initialCredentials = storedCredentials(for: id) else { return nil }
+        guard let initialCredentials = storedCredentials(for: id) else {
+            // Removed from the file, for example by another copy of the app signing out.
+            if let saved = try? loadSavedAccounts() {
+                show(saved)
+                if !isShown(id) { startPolling() }
+            }
+            return nil
+        }
 
         if initialCredentials.needsRefresh() {
             let refreshResult = await refreshCredentials(for: id, force: true)

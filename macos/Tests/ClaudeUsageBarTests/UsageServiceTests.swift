@@ -401,7 +401,7 @@ final class UsageServiceTests: XCTestCase {
 
         XCTAssertEqual(service.accountEmail, "b@example.com")
         XCTAssertEqual(service.usage?.sevenDay?.utilization, Self.utilization["b"])
-        XCTAssertEqual(store.loadAccounts(defaultScopes: []).map(\.id), [b.id, a.id])
+        XCTAssertEqual(try store.loadAccounts(defaultScopes: []).map(\.id), [b.id, a.id])
     }
 
     func testSigningOutMovesToTheAccountUsedLast() throws {
@@ -419,7 +419,7 @@ final class UsageServiceTests: XCTestCase {
 
         XCTAssertEqual(service.accountEmail, "b@example.com")
         XCTAssertEqual(history.history.account, "org/b")
-        XCTAssertEqual(store.loadAccounts(defaultScopes: []).map(\.id), [b.id, a.id])
+        XCTAssertEqual(try store.loadAccounts(defaultScopes: []).map(\.id), [b.id, a.id])
     }
 
     func testSigningInAgainToAnAccountReplacesItsEarlierSignIn() async throws {
@@ -438,7 +438,7 @@ final class UsageServiceTests: XCTestCase {
 
         XCTAssertEqual(service.accounts.map(\.profileID), ["org/u", "org/other"])
         XCTAssertEqual(service.accounts.first?.credentials.accessToken, "signed-in-access")
-        XCTAssertEqual(store.loadAccounts(defaultScopes: []), service.accounts)
+        XCTAssertEqual(try store.loadAccounts(defaultScopes: []), service.accounts)
     }
 
     func testARefreshFinishingAfterASwitchIsSavedToItsOwnAccount() async throws {
@@ -477,9 +477,38 @@ final class UsageServiceTests: XCTestCase {
         await fetchA.value
 
         XCTAssertEqual(service.usage?.sevenDay?.utilization, Self.utilization["b"])
-        let saved = store.loadAccounts(defaultScopes: [])
+        let saved = try store.loadAccounts(defaultScopes: [])
         XCTAssertEqual(saved.first { $0.id == a.id }?.credentials.refreshToken, "refresh-a2")
         XCTAssertEqual(saved.first { $0.id == b.id }?.credentials, b.credentials)
+    }
+
+    func testAnAccountRemovedFromTheFileIsNoLongerShown() async throws {
+        let store = try makeStore()
+        let (a, b) = (Self.account("a"), Self.account("b"))
+        try store.save([a, b])
+        MockURLProtocol.handler = Self.usageByAccountHandler
+        let service = makeOAuthService(store: store, listener: false)
+        defer { signOutAll(service) }
+
+        try store.save([b])
+        await service.fetchUsage()
+
+        XCTAssertEqual(service.accounts, [b])
+    }
+
+    func testSigningOutDoesNotSaveOverAnUnreadableFile() throws {
+        let store = try makeStore()
+        let (a, b) = (Self.account("a"), Self.account("b"))
+        try store.save([a, b])
+        let service = makeOAuthService(store: store, listener: false)
+        defer { signOutAll(service) }
+
+        let path = store.credentialsFileURL.path
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: path)
+        service.signOut()
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
+
+        XCTAssertEqual(try store.loadAccounts(defaultScopes: []), [a, b])
     }
 
     private static func account(_ name: String) -> StoredAccount {
@@ -510,7 +539,7 @@ final class UsageServiceTests: XCTestCase {
 
     /// Stops polling, so it can't reach a later test's handler.
     private func signOutAll(_ service: UsageService) {
-        while service.isAuthenticated { service.signOut() }
+        for _ in service.accounts { service.signOut() }
     }
 
     // MARK: - Transient vs permanent refresh failure

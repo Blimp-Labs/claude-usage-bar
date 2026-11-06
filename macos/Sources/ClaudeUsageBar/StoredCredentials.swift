@@ -62,20 +62,24 @@ struct StoredCredentialsStore {
         try? fileManager.removeItem(at: legacyTokenFileURL)
     }
 
-    /// Most recently used first.
-    func loadAccounts(defaultScopes: [String]) -> [StoredAccount] {
-        let data = try? Data(contentsOf: credentialsFileURL)
+    /// Most recently used first. Throws when the file is there but can't be read,
+    /// so a failed read is never saved back as no accounts.
+    func loadAccounts(defaultScopes: [String]) throws -> [StoredAccount] {
+        var data: Data?
+        if fileManager.fileExists(atPath: credentialsFileURL.path) {
+            data = try Data(contentsOf: credentialsFileURL)
+        }
         if let data, let file = try? Self.decoder.decode(AccountsFile.self, from: data) {
             return file.accounts
         }
 
-        // Earlier versions saved one account. Resaved so its id stays the same on the next load.
+        // Earlier versions saved one account. Saved again now, or it gets a new id on every load.
         guard let credentials = data.flatMap({ try? Self.decoder.decode(StoredCredentials.self, from: $0) })
                 ?? legacyToken(defaultScopes: defaultScopes) else {
             return []
         }
         let accounts = [StoredAccount(credentials: credentials)]
-        try? save(accounts)
+        try save(accounts)
         return accounts
     }
 

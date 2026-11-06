@@ -23,7 +23,7 @@ final class StoredCredentialsTests: XCTestCase {
 
         try store.save(accounts)
 
-        XCTAssertEqual(store.loadAccounts(defaultScopes: []), accounts)
+        XCTAssertEqual(try store.loadAccounts(defaultScopes: []), accounts)
         let filePermissions = try permissions(for: store.credentialsFileURL)
         let directoryPermissions = try permissions(for: store.directoryURL)
         XCTAssertEqual(filePermissions, 0o600)
@@ -39,10 +39,18 @@ final class StoredCredentialsTests: XCTestCase {
         {"accessToken": "old-access", "refreshToken": "old-refresh", "scopes": ["user:profile"]}
         """.utf8).write(to: store.credentialsFileURL)
 
-        let migrated = store.loadAccounts(defaultScopes: [])
+        let migrated = try store.loadAccounts(defaultScopes: [])
 
         XCTAssertEqual(migrated.map(\.credentials.accessToken), ["old-access"])
-        XCTAssertEqual(store.loadAccounts(defaultScopes: []), migrated)
+        XCTAssertEqual(try store.loadAccounts(defaultScopes: []), migrated)
+    }
+
+    func testStoreThrowsInsteadOfLoadingAnUnreadableFileAsNoAccounts() throws {
+        let store = try makeStore()
+        try store.save([StoredAccount(credentials: StoredCredentials(accessToken: "a", refreshToken: nil, expiresAt: nil, scopes: []))])
+        try setPermissions(0o000, of: store.credentialsFileURL)
+
+        XCTAssertThrowsError(try store.loadAccounts(defaultScopes: []))
     }
 
     func testStoreLoadsLegacyRawTokenFile() throws {
@@ -54,7 +62,7 @@ final class StoredCredentialsTests: XCTestCase {
         )
 
         let loaded = try XCTUnwrap(
-            store.loadAccounts(defaultScopes: UsageService.defaultOAuthScopes).first?.credentials
+            try store.loadAccounts(defaultScopes: UsageService.defaultOAuthScopes).first?.credentials
         )
 
         XCTAssertEqual(loaded.accessToken, "legacy-access-token")
@@ -123,6 +131,15 @@ final class StoredCredentialsTests: XCTestCase {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return StoredCredentialsStore(directoryURL: directory)
+    }
+
+    /// Restores the original mode after the test.
+    private func setPermissions(_ mode: Int, of url: URL) throws {
+        let original = try permissions(for: url)
+        try FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: url.path)
+        addTeardownBlock {
+            try? FileManager.default.setAttributes([.posixPermissions: original], ofItemAtPath: url.path)
+        }
     }
 
     private func permissions(for url: URL) throws -> Int {

@@ -109,16 +109,17 @@ private struct AccountSection: View {
                 Text(email)
             }
 
+            if let error = service.lastError {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.red)
+                    .font(.caption)
+            }
+
             if service.isAwaitingCode {
                 if service.isWaitingForBrowser {
                     BrowserSignInView(service: service)
                 } else {
                     CodeEntryView(service: service)
-                    if let error = service.lastError {
-                        Label(error, systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(.red)
-                            .font(.caption)
-                    }
                 }
                 Text("To add a different account, sign in to it on claude.ai first.")
                     .font(.caption)
