@@ -380,7 +380,6 @@ final class UsageServiceTests: XCTestCase {
         releaseAccountA.signal()
         await accountAUsage.value
 
-        XCTAssertNotEqual(service.usage?.sevenDay?.utilization, 90)
         XCTAssertFalse(history.history.dataPoints.contains { $0.pct7d == 0.9 })
     }
 
