@@ -50,14 +50,7 @@ struct SettingsWindowContent: View {
             .disabled(!notificationService.isAvailable)
 
             if service.isAuthenticated {
-                Section("Account") {
-                    if let email = service.accountEmail {
-                        Text(email)
-                    }
-                    Button("Sign Out") {
-                        service.signOut()
-                    }
-                }
+                AccountSection(service: service)
             }
 
             Section("Updates") {
@@ -95,6 +88,61 @@ struct SettingsWindowContent: View {
         .onAppear {
             focusSettingsWindow()
         }
+    }
+}
+
+private struct AccountSection: View {
+    @ObservedObject var service: UsageService
+
+    var body: some View {
+        Section("Account") {
+            if service.accounts.count > 1 {
+                Picker("Show usage for", selection: Binding(
+                    get: { service.accounts.first?.id },
+                    set: { if let id = $0 { service.switchAccount(to: id) } }
+                )) {
+                    ForEach(service.accounts.sorted { label(for: $0) < label(for: $1) }) { account in
+                        Text(label(for: account)).tag(Optional(account.id))
+                    }
+                }
+            } else if let email = service.accountEmail {
+                Text(email)
+            }
+
+            if let error = service.lastError {
+                ErrorLabel(message: error)
+            }
+
+            if service.isAwaitingCode {
+                if service.isWaitingForBrowser {
+                    BrowserSignInView(service: service)
+                } else {
+                    CodeEntryView(service: service)
+                }
+                Text("To add a different account, sign in to it on claude.ai first.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                HStack {
+                    Button("Add Account…") {
+                        Task { await service.startOAuthFlow() }
+                    }
+                    Button("Sign Out") {
+                        service.signOut()
+                    }
+                }
+            }
+        }
+    }
+
+    /// Adds the organization when one login is signed in to several.
+    private func label(for account: StoredAccount) -> String {
+        let email = account.email ?? "Unknown account"
+        guard service.accounts.filter({ $0.email == account.email }).count > 1,
+              let organization = account.organizationName else {
+            return email
+        }
+        return "\(email) — \(organization)"
     }
 }
 

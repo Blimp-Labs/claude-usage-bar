@@ -78,6 +78,18 @@ final class NotificationServiceTests: XCTestCase {
         XCTAssertEqual(alerts, [ThresholdAlert(window: "5-hour", pct: 80)])
     }
 
+    @MainActor
+    func testSwitchingBackToAnAccountDoesNotRepeatItsAlert() {
+        let saved = UserDefaults.standard.object(forKey: "notificationThreshold7d")
+        addTeardownBlock { UserDefaults.standard.set(saved, forKey: "notificationThreshold7d") }
+        let service = NotificationService()
+        service.setThreshold7d(80)
+
+        XCTAssertEqual(service.checkAndNotify(pct5h: 0, pct7d: 0.9, pctExtra: 0, account: "a").count, 1)
+        XCTAssertTrue(service.checkAndNotify(pct5h: 0, pct7d: 0.1, pctExtra: 0, account: "b").isEmpty)
+        XCTAssertTrue(service.checkAndNotify(pct5h: 0, pct7d: 0.9, pctExtra: 0, account: "a").isEmpty)
+    }
+
     func testFirstPollFiresWhenAlreadyAboveThreshold() {
         let alerts = crossedThresholds(
             threshold5h: 25, threshold7d: 5, thresholdExtra: 0,

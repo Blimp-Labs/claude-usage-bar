@@ -24,7 +24,7 @@ A small macOS menu bar app that shows how much of your Claude plan's usage limit
 - A usage history chart from the last hour to the last 30 days; hover it for exact values
 - Notifications when a limit passes a percentage you choose
 - Launch at login, and a choice of how often to refresh (every 5 minutes to every hour)
-- Sign in with your Claude account in the browser; no API key needed
+- Sign in with your Claude accounts in the browser and switch between them; no API key needed
 - Updates itself
 
 ## Install
@@ -48,11 +48,13 @@ You only do this once. Updates install without the warning.
 
 If the browser can't hand the sign-in back to the app, click **Paste a code instead** and paste the code the page shows.
 
+To add another account, click **Add Account…** in **Settings → Account**. The browser signs in with the account it uses on claude.ai, so sign in to the other account there first.
+
 Click the icon any time for the details. **Settings…** in the popover has:
 
 - **General:** launch at login, and how often to refresh
 - **Notifications:** an alert threshold for the 5-hour, 7-day and extra-usage limits, or **Off**
-- **Account:** the signed-in account, and **Sign Out**
+- **Account:** which account to show usage for, **Add Account…**, and **Sign Out**, which moves to the account you used before it
 - **Updates:** your version, the daily update check, and **Check for Updates…**
 
 ## Updates
@@ -65,7 +67,7 @@ Your data stays on your Mac, in `~/.config/claude-usage-bar/`:
 
 | File | Contents |
 |------|----------|
-| `credentials.json` | Your sign-in tokens, readable only by you |
+| `credentials.json` | Sign-in tokens for each account you add, readable only by you |
 | `history.json` | Usage history for the chart, for each account you sign into, kept for 30 days, readable only by you |
 
 The app only connects to:
@@ -76,7 +78,7 @@ The app only connects to:
 
 While you sign in, it also listens on `127.0.0.1`, reachable only from your Mac, for the browser to hand back the sign-in.
 
-**Settings → Account → Sign Out** deletes your saved tokens.
+**Settings → Account → Sign Out** deletes the shown account's saved tokens.
 
 ## Uninstall
 
