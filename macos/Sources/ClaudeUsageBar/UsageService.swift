@@ -349,8 +349,7 @@ class UsageService: ObservableObject {
                 return false
             }
             isAuthenticated = true
-            accountEmail = nil
-            accountGeneration += 1
+            forgetAccount()
             lastError = nil
             endOAuthFlow()
 
@@ -383,8 +382,7 @@ class UsageService: ObservableObject {
         isAuthenticated = false
         usage = nil
         lastUpdated = nil
-        accountEmail = nil
-        accountGeneration += 1
+        forgetAccount()
         timer?.invalidate()
         timer = nil
         refreshTask?.cancel()
@@ -414,6 +412,7 @@ class UsageService: ObservableObject {
             return
         }
 
+        let generation = accountGeneration
         do {
             // A local mock returning 401 must not delete the user's real
             // credentials — the token endpoint is not overridable, so the
@@ -421,10 +420,13 @@ class UsageService: ObservableObject {
             // (It does still refresh against the real token endpoint, which
             // rotates the refresh token; harmless, but worth knowing.)
             let isLocalMock = Self.isLoopback(usageEndpoint)
-            guard let result = try await sendAuthorizedRequest(
+            let result = try await sendAuthorizedRequest(
                 to: usageEndpoint,
                 expireSessionOnAuthFailure: !isLocalMock
-            ) else {
+            )
+            // The account changed while the request was in flight.
+            guard generation == accountGeneration else { return }
+            guard let result else {
                 // expireSession() normally reports this; skipping it must not
                 // leave stale numbers on screen with no indication why.
                 if isLocalMock, lastError == nil {
@@ -462,7 +464,7 @@ class UsageService: ObservableObject {
                 scheduleTimer()
             }
         } catch {
-            lastError = error.localizedDescription
+            if generation == accountGeneration { lastError = error.localizedDescription }
         }
     }
 
@@ -480,11 +482,21 @@ class UsageService: ObservableObject {
         guard http.statusCode == 200,
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let account = json["account"] as? [String: Any],
+              let accountID = account["uuid"] as? String,
               let email = account["email"] as? String, !email.isEmpty,
+              let organizationID = (json["organization"] as? [String: Any])?["uuid"] as? String,
               generation == accountGeneration else {
             return
         }
         accountEmail = email
+        // Limits belong to the organization, so one login in two orgs keeps two histories.
+        historyService?.setAccount("\(organizationID)/\(accountID)")
+    }
+
+    private func forgetAccount() {
+        accountEmail = nil
+        accountGeneration += 1
+        historyService?.setAccount(nil)
     }
 
     // MARK: - Credential storage
@@ -720,8 +732,7 @@ class UsageService: ObservableObject {
         isAuthenticated = false
         usage = nil
         lastUpdated = nil
-        accountEmail = nil
-        accountGeneration += 1
+        forgetAccount()
         timer?.invalidate()
         timer = nil
         refreshTask?.cancel()

@@ -5,16 +5,21 @@ struct UsageDataPoint: Codable, Identifiable {
     let timestamp: Date
     let pct5h: Double
     let pct7d: Double
+    /// Nil until the account is known; the next account identified adopts it.
+    var account: String?
 
-    init(timestamp: Date = Date(), pct5h: Double, pct7d: Double) {
+    init(timestamp: Date = Date(), pct5h: Double, pct7d: Double, account: String? = nil) {
         self.id = UUID()
         self.timestamp = timestamp
         self.pct5h = pct5h
         self.pct7d = pct7d
+        self.account = account
     }
 }
 
 struct UsageHistory: Codable {
+    /// The signed-in account, saved so a relaunch charts it before its profile loads.
+    var account: String?
     var dataPoints: [UsageDataPoint] = []
 }
 
