@@ -3,26 +3,16 @@ import SwiftUI
 struct PopoverView: View {
     @ObservedObject var service: UsageService
     @ObservedObject var historyService: UsageHistoryService
-    @ObservedObject var notificationService: NotificationService
-    @AppStorage("setupComplete") private var setupComplete = false
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if !setupComplete && !service.isAuthenticated {
-                SetupView(
-                    service: service,
-                    notificationService: notificationService,
-                    onComplete: { setupComplete = true }
-                )
+            Text("Claude Usage")
+                .font(.headline)
+            if !service.isAuthenticated {
+                signInView
             } else {
-                Text("Claude Usage")
-                    .font(.headline)
-                if !service.isAuthenticated {
-                    signInView
-                } else {
-                    usageView
-                }
+                usageView
             }
         }
         .padding()
@@ -40,11 +30,14 @@ struct PopoverView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
-            Button("Sign in with Claude") {
+            Button {
                 Task { await service.startOAuthFlow() }
+            } label: {
+                Text("Sign in with Claude")
+                    .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .frame(maxWidth: .infinity)
+            .controlSize(.large)
         }
 
         if let error = service.lastError {
@@ -55,10 +48,7 @@ struct PopoverView: View {
         HStack {
             settingsButton
             Spacer()
-            Button("Quit") {
-                NSApplication.shared.terminate(nil)
-            }
-            .buttonStyle(.borderless)
+            quitButton
         }
     }
 
@@ -117,10 +107,7 @@ struct PopoverView: View {
             }
             .buttonStyle(.borderless)
             .font(.caption)
-            Button("Quit") { NSApplication.shared.terminate(nil) }
-                .buttonStyle(.borderless)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            quitButton
         }
     }
 
@@ -159,99 +146,12 @@ struct PopoverView: View {
         .buttonStyle(.borderless)
         .font(.caption)
     }
-}
 
-// MARK: - Setup (first launch)
-
-private struct SetupView: View {
-    @ObservedObject var service: UsageService
-    @ObservedObject var notificationService: NotificationService
-    var onComplete: () -> Void
-
-    var body: some View {
-        Text("Welcome")
-            .font(.headline)
-        Text("Configure your preferences to get started.")
-            .font(.subheadline)
+    private var quitButton: some View {
+        Button("Quit") { NSApplication.shared.terminate(nil) }
+            .buttonStyle(.borderless)
+            .font(.caption)
             .foregroundStyle(.secondary)
-
-        Divider()
-
-        LaunchAtLoginToggle(useSwitchStyle: true)
-            .controlSize(.small)
-
-        Divider()
-
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Notifications")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-            if !notificationService.isAvailable {
-                Text(notificationsUnavailableMessage)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            SetupThresholdSlider(
-                label: "5-hour window",
-                value: notificationService.threshold5h,
-                onChange: { notificationService.setThreshold5h($0) }
-            )
-            SetupThresholdSlider(
-                label: "7-day window",
-                value: notificationService.threshold7d,
-                onChange: { notificationService.setThreshold7d($0) }
-            )
-            SetupThresholdSlider(
-                label: "Extra usage",
-                value: notificationService.thresholdExtra,
-                onChange: { notificationService.setThresholdExtra($0) }
-            )
-        }
-        .disabled(!notificationService.isAvailable)
-
-        Divider()
-
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Polling Interval")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-            Picker("", selection: Binding(
-                get: { service.pollingMinutes },
-                set: { service.updatePollingInterval($0) }
-            )) {
-                ForEach(UsageService.pollingOptions, id: \.self) { mins in
-                    Text(localizedPollingInterval(for: mins, locale: .autoupdatingCurrent))
-                        .tag(mins)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-
-            if isDiscouragedPollingOption(service.pollingMinutes) {
-                Text("Frequent polling may cause rate limiting")
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
-            }
-        }
-
-        Divider()
-
-        Button("Get Started") {
-            onComplete()
-        }
-        .buttonStyle(.borderedProminent)
-        .frame(maxWidth: .infinity)
-
-        HStack {
-            Spacer()
-            Button("Quit") { NSApplication.shared.terminate(nil) }
-                .buttonStyle(.borderless)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
     }
 }
 
@@ -383,34 +283,6 @@ private struct ExtraUsageRow: View {
                 ProgressView(value: (extra.utilization ?? 0) / 100.0, total: 1.0)
                     .tint(.blue)
             }
-        }
-    }
-}
-
-private struct SetupThresholdSlider: View {
-    let label: String
-    let value: Int
-    let onChange: (Int) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack {
-                Text(label)
-                    .font(.callout)
-                Spacer()
-                Text(value > 0 ? "\(value)%" : "Off")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            Slider(
-                value: Binding(
-                    get: { Double(value) },
-                    set: { onChange(Int($0)) }
-                ),
-                in: 0...100,
-                step: 5
-            )
-            .controlSize(.small)
         }
     }
 }
