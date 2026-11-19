@@ -162,42 +162,26 @@ func focusSettingsWindow() {
 
 struct LaunchAtLoginToggle: View {
     @StateObject private var model: LaunchAtLoginModel
-    private let useSwitchStyle: Bool
 
-    init(
-        useSwitchStyle: Bool = false,
-        bundleURL: URL = Bundle.main.bundleURL
-    ) {
+    init(bundleURL: URL = Bundle.main.bundleURL) {
         _model = StateObject(
             wrappedValue: LaunchAtLoginModel(bundleURL: bundleURL)
         )
-        self.useSwitchStyle = useSwitchStyle
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            toggle
+            Toggle("Launch at Login", isOn: Binding(
+                get: { model.isEnabled },
+                set: { model.setEnabled($0) }
+            ))
+            .disabled(!model.isSupported)
 
             if let message = model.message {
                 Text(message)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
-        }
-    }
-
-    @ViewBuilder
-    private var toggle: some View {
-        let baseToggle = Toggle("Launch at Login", isOn: Binding(
-            get: { model.isEnabled },
-            set: { model.setEnabled($0) }
-        ))
-        .disabled(!model.isSupported)
-
-        if useSwitchStyle {
-            baseToggle.toggleStyle(.switch)
-        } else {
-            baseToggle
         }
     }
 }

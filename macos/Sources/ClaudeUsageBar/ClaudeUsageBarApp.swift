@@ -11,8 +11,7 @@ struct ClaudeUsageBarApp: App {
         MenuBarExtra {
             PopoverView(
                 service: service,
-                historyService: historyService,
-                notificationService: notificationService
+                historyService: historyService
             )
         } label: {
             Image(nsImage: service.isAuthenticated
@@ -20,10 +19,6 @@ struct ClaudeUsageBarApp: App {
                 : renderUnauthenticatedIcon()
             )
                 .task {
-                    // Auto-mark existing users as setup-complete
-                    if service.isAuthenticated && !UserDefaults.standard.bool(forKey: "setupComplete") {
-                        UserDefaults.standard.set(true, forKey: "setupComplete")
-                    }
                     historyService.loadHistory()
                     service.historyService = historyService
                     service.notificationService = notificationService
